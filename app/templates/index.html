@@ -282,6 +282,31 @@
     flex:1 1 220px;
   }
   .conn-field-port{flex:0 1 110px;}
+  .conn-field-transport{flex:0 1 auto;}
+  .toggle-group{
+    display:flex;
+    border:1px solid var(--panel-edge);
+    border-radius:3px;
+    background:#0a0f0c;
+    overflow:hidden;
+  }
+  .toggle-opt{
+    font-family:var(--mono);
+    font-size:0.75rem;
+    letter-spacing:0.06em;
+    text-transform:uppercase;
+    padding:0.55rem 0.9rem;
+    background:transparent;
+    border:none;
+    border-radius:0;
+    color:var(--text-dim);
+    cursor:pointer;
+    transition:all .15s ease;
+  }
+  .toggle-opt + .toggle-opt{border-left:1px solid var(--panel-edge);}
+  .toggle-opt:hover{color:var(--amber);}
+  .toggle-opt.active{background:rgba(232,163,61,0.12); color:var(--amber);}
+  .toggle-opt:disabled{opacity:0.4; cursor:default;}
   .conn-field input{
     font-family:var(--mono);
     font-size:0.9rem;
@@ -410,12 +435,12 @@
   <div class="panel" style="margin-bottom:1rem;">
     <h2>Conexión</h2>
     <div class="conn-row">
-      <label class="conn-field">
+      <label class="conn-field conn-field-transport">
         <span>Transporte</span>
-        <select id="conn-transport">
-          <option value="tcp">Red (ser2net)</option>
-          <option value="serial">Serie directo (mismo equipo)</option>
-        </select>
+        <div class="toggle-group" id="conn-transport">
+          <button type="button" class="toggle-opt active" data-transport="tcp">Red</button>
+          <button type="button" class="toggle-opt" data-transport="serial">Serie</button>
+        </div>
       </label>
       <span id="tcp-fields">
         <label class="conn-field">
@@ -590,6 +615,17 @@ function describeAck(rawHex) {
 let defaultsLoaded = false;
 let inFlightAction = false;
 
+function getTransport() {
+  return document.querySelector('#conn-transport .toggle-opt.active').dataset.transport;
+}
+
+function setTransport(value) {
+  document.querySelectorAll('#conn-transport .toggle-opt').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.transport === value);
+  });
+  updateTransportFields();
+}
+
 function addLog(msg) {
   const box = document.getElementById('log-box');
   const empty = box.querySelector('.log-empty');
@@ -609,7 +645,7 @@ function addLog(msg) {
 function setConnUiState(connecting, connected) {
   document.getElementById('btn-connect').disabled = connecting || connected;
   document.getElementById('btn-disconnect').disabled = connecting || !connected;
-  document.getElementById('conn-transport').disabled = connecting || connected;
+  document.querySelectorAll('#conn-transport .toggle-opt').forEach(btn => btn.disabled = connecting || connected);
   document.getElementById('conn-host').disabled = connecting || connected;
   document.getElementById('conn-port').disabled = connecting || connected;
   document.getElementById('conn-device').disabled = connecting || connected;
@@ -625,12 +661,14 @@ function setConnUiState(connecting, connected) {
 }
 
 function updateTransportFields() {
-  const isSerial = document.getElementById('conn-transport').value === 'serial';
+  const isSerial = getTransport() === 'serial';
   document.getElementById('tcp-fields').classList.toggle('hidden', isSerial);
   document.getElementById('serial-fields').classList.toggle('hidden', !isSerial);
   document.getElementById('serial-note').style.display = isSerial ? '' : 'none';
 }
-document.getElementById('conn-transport').addEventListener('change', updateTransportFields);
+document.querySelectorAll('#conn-transport .toggle-opt').forEach(btn => {
+  btn.addEventListener('click', () => setTransport(btn.dataset.transport));
+});
 updateTransportFields();
 
 function setAlarmLed(ledId, rowId, isAlarm) {
@@ -653,8 +691,7 @@ async function poll() {
       if (!portInput.value) portInput.value = data.port || data.default_port || '';
       if (!deviceInput.value) deviceInput.value = data.device || data.default_device || '';
       if (data.transport) {
-        document.getElementById('conn-transport').value = data.transport;
-        updateTransportFields();
+        setTransport(data.transport);
       }
       defaultsLoaded = true;
     }
@@ -765,8 +802,7 @@ function renderFavs() {
 }
 
 function connectToFav(fav) {
-  document.getElementById('conn-transport').value = fav.transport || 'tcp';
-  updateTransportFields();
+  setTransport(fav.transport || 'tcp');
   document.getElementById('conn-host').value = fav.host || '';
   document.getElementById('conn-port').value = fav.port || '';
   document.getElementById('conn-device').value = fav.device || '';
@@ -775,7 +811,7 @@ function connectToFav(fav) {
 
 document.getElementById('btn-fav-add').addEventListener('click', () => {
   const toast = document.getElementById('conn-toast');
-  const transport = document.getElementById('conn-transport').value;
+  const transport = getTransport();
   const host = document.getElementById('conn-host').value.trim();
   const port = parseInt(document.getElementById('conn-port').value, 10);
   const device = document.getElementById('conn-device').value.trim();
@@ -807,7 +843,7 @@ renderFavs();
 
 document.getElementById('btn-connect').addEventListener('click', async () => {
   const toast = document.getElementById('conn-toast');
-  const transport = document.getElementById('conn-transport').value;
+  const transport = getTransport();
   const host = document.getElementById('conn-host').value.trim();
   const port = parseInt(document.getElementById('conn-port').value, 10);
   const device = document.getElementById('conn-device').value.trim();

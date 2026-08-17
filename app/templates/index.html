@@ -1,0 +1,1046 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Amplificador FM · Consola</title>
+<style>
+  :root{
+    --bg: #0d1210;
+    --panel: #131a17;
+    --panel-edge: #1f2a25;
+    --panel-head: #182019;
+    --text: #d8e6de;
+    --text-dim: #6f8478;
+    --amber: #e8a33d;
+    --green: #4caf7d;
+    --red: #d9584f;
+    --red-glow: rgba(217,88,79,0.6);
+    --mono: 'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace;
+    --sans: 'Inter', -apple-system, sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:
+      radial-gradient(circle at 15% 0%, #16211c 0%, transparent 45%),
+      var(--bg);
+    color:var(--text);
+    font-family:var(--sans);
+    min-height:100vh;
+    padding:2rem 1.25rem 4rem;
+  }
+  .wrap{max-width:1180px;margin:0 auto;}
+
+  header{
+    display:flex;
+    justify-content:space-between;
+    align-items:baseline;
+    border-bottom:1px solid var(--panel-edge);
+    padding-bottom:1.1rem;
+    margin-bottom:1.75rem;
+    flex-wrap:wrap;
+    gap:0.5rem;
+  }
+  header h1{
+    font-family:var(--mono);
+    font-size:1.05rem;
+    letter-spacing:0.12em;
+    text-transform:uppercase;
+    margin:0;
+    color:var(--text);
+    font-weight:600;
+  }
+  header .sub{
+    font-family:var(--mono);
+    font-size:0.72rem;
+    color:var(--text-dim);
+    letter-spacing:0.06em;
+  }
+
+  .link-status{
+    display:flex;
+    align-items:center;
+    gap:0.5rem;
+    font-family:var(--mono);
+    font-size:0.72rem;
+    letter-spacing:0.05em;
+    text-transform:uppercase;
+  }
+  .dot{
+    width:8px;height:8px;border-radius:50%;
+    background:var(--text-dim);
+    box-shadow:0 0 0 rgba(0,0,0,0);
+    transition:all .3s ease;
+  }
+  .dot.ok{background:var(--green); box-shadow:0 0 8px 1px rgba(76,175,125,0.55);}
+  .dot.bad{background:var(--red); box-shadow:0 0 8px 1px var(--red-glow); animation:pulse 1.4s infinite;}
+  @keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.35;}}
+
+  .grid3{
+    display:grid;
+    grid-template-columns: 1fr 1.15fr 0.85fr;
+    gap:1rem;
+    margin-bottom:1rem;
+    align-items:start;
+  }
+  .grid2{
+    display:grid;
+    grid-template-columns: 1fr 1fr;
+    gap:1rem;
+    margin-bottom:1rem;
+    align-items:start;
+  }
+  @media (max-width:900px){ .grid3{grid-template-columns:1fr;} }
+  @media (max-width:640px){ .grid2{grid-template-columns:1fr;} }
+
+  .panel{
+    background:var(--panel);
+    border:1px solid var(--panel-edge);
+    border-radius:3px;
+    padding:1.1rem 1.3rem 1.3rem;
+    position:relative;
+  }
+  .panel::before{
+    content:'';
+    position:absolute; top:0; left:0; right:0; height:2px;
+    background:linear-gradient(90deg, var(--amber), transparent 70%);
+    opacity:0.6;
+  }
+  .panel h2{
+    font-family:var(--mono);
+    font-size:0.68rem;
+    letter-spacing:0.14em;
+    text-transform:uppercase;
+    color:var(--text-dim);
+    margin:0 0 0.9rem;
+  }
+
+  .reading{
+    display:flex;
+    align-items:baseline;
+    gap:0.5rem;
+    margin-bottom:0.35rem;
+  }
+  .reading .val{
+    font-family:var(--mono);
+    font-size:2.2rem;
+    font-weight:600;
+    color:var(--text);
+    font-variant-numeric: tabular-nums;
+    line-height:1;
+  }
+  .reading .unit{
+    font-family:var(--mono);
+    font-size:0.95rem;
+    color:var(--amber);
+  }
+  .meter-track{
+    height:6px;
+    border-radius:3px;
+    background:#0a0f0c;
+    overflow:hidden;
+    margin-top:0.6rem;
+    border:1px solid var(--panel-edge);
+  }
+  .meter-fill{
+    height:100%;
+    background:linear-gradient(90deg, var(--green), var(--amber));
+    width:0%;
+    transition:width .5s ease;
+  }
+  .meter-caption{
+    font-family:var(--mono);
+    font-size:0.63rem;
+    color:var(--text-dim);
+    margin-top:0.4rem;
+  }
+
+  .stat-row{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    padding:0.5rem 0;
+    border-bottom:1px solid var(--panel-edge);
+    font-family:var(--mono);
+    font-size:0.82rem;
+  }
+  .stat-row:last-child{border-bottom:none;}
+  .stat-row .label{color:var(--text-dim);}
+  .stat-row .value{color:var(--text); font-variant-numeric: tabular-nums;}
+
+  .amps-table{width:100%; border-collapse:collapse;}
+  .amps-table th{
+    font-family:var(--mono);
+    font-size:0.6rem;
+    letter-spacing:0.08em;
+    text-transform:uppercase;
+    color:var(--text-dim);
+    text-align:left;
+    padding:0 0 0.5rem;
+    font-weight:500;
+  }
+  .amps-table th.num, .amps-table td.num{text-align:right;}
+  .amps-table td{
+    font-family:var(--mono);
+    font-size:0.85rem;
+    padding:0.4rem 0;
+    border-top:1px solid var(--panel-edge);
+    vertical-align:middle;
+  }
+  .amps-table td.n{color:var(--text-dim);}
+  .amps-table td.bar-cell{width:45%;}
+  .amps-table th.amp-led-col, .amps-table td.amp-led-col{text-align:center; width:2rem;}
+  .amp-bar-track{
+    height:8px;
+    border-radius:3px;
+    background:#0a0f0c;
+    border:1px solid var(--panel-edge);
+    overflow:hidden;
+  }
+  .amp-bar-fill{
+    height:100%;
+    background:linear-gradient(90deg, var(--green), var(--amber));
+    width:0%;
+    transition:width .5s ease;
+  }
+
+  .alarm-row{
+    display:flex;
+    align-items:center;
+    gap:0.6rem;
+    padding:0.5rem 0;
+    font-family:var(--mono);
+    font-size:0.78rem;
+    border-bottom:1px solid var(--panel-edge);
+  }
+  .alarm-row:last-child{border-bottom:none;}
+  .alarm-row .name{flex:1;}
+  .alarm-row.is-alarm{color:var(--red);}
+  .led{
+    display:inline-block;
+    width:9px;height:9px;border-radius:50%;
+    background:var(--green);
+    box-shadow:0 0 6px 0 rgba(76,175,125,0.5);
+    flex-shrink:0;
+  }
+  .led.alarm{
+    background:var(--red);
+    box-shadow:0 0 9px 2px var(--red-glow);
+  }
+
+  .actions{
+    display:flex;
+    gap:0.6rem;
+    margin-top:1rem;
+    flex-wrap:wrap;
+  }
+  button{
+    font-family:var(--mono);
+    font-size:0.75rem;
+    letter-spacing:0.08em;
+    text-transform:uppercase;
+    padding:0.65rem 1.1rem;
+    background:transparent;
+    border:1px solid var(--panel-edge);
+    color:var(--text);
+    border-radius:3px;
+    cursor:pointer;
+    transition:all .15s ease;
+  }
+  button:hover{border-color:var(--amber); color:var(--amber);}
+  button:active{transform:translateY(1px);}
+  button:disabled{opacity:0.4; cursor:default;}
+  button.danger:hover{border-color:var(--red); color:var(--red);}
+  button.power{font-size:0.95rem; padding:0.75rem 1.4rem; flex:1;}
+
+  .toast{
+    font-family:var(--mono);
+    font-size:0.72rem;
+    color:var(--text-dim);
+    margin-top:0.6rem;
+    min-height:1em;
+  }
+  .toast.err{color:var(--red);}
+  .toast.ok{color:var(--green);}
+
+  .conn-row{
+    display:flex;
+    align-items:flex-end;
+    gap:0.75rem;
+    flex-wrap:wrap;
+  }
+  .conn-field{
+    display:flex;
+    flex-direction:column;
+    gap:0.3rem;
+    font-family:var(--mono);
+    font-size:0.68rem;
+    letter-spacing:0.08em;
+    text-transform:uppercase;
+    color:var(--text-dim);
+    flex:1 1 220px;
+  }
+  .conn-field-port{flex:0 1 110px;}
+  .conn-field input{
+    font-family:var(--mono);
+    font-size:0.9rem;
+    background:#0a0f0c;
+    border:1px solid var(--panel-edge);
+    color:var(--text);
+    border-radius:3px;
+    padding:0.55rem 0.6rem;
+  }
+  .conn-field input:focus{outline:none; border-color:var(--amber);}
+  .conn-field input:disabled{opacity:0.5;}
+
+  footer{
+    margin-top:2rem;
+    font-family:var(--mono);
+    font-size:0.65rem;
+    color:var(--text-dim);
+    text-align:center;
+    letter-spacing:0.05em;
+  }
+
+  .fav-row{
+    display:flex;
+    align-items:center;
+    gap:0.5rem;
+    flex-wrap:wrap;
+    margin-top:0.75rem;
+    padding-top:0.75rem;
+    border-top:1px solid var(--panel-edge);
+  }
+  .fav-chip{
+    display:flex;
+    align-items:center;
+    gap:0.4rem;
+    font-family:var(--mono);
+    font-size:0.72rem;
+    background:#0a0f0c;
+    border:1px solid var(--panel-edge);
+    border-radius:3px;
+    padding:0.3rem 0.3rem 0.3rem 0.6rem;
+  }
+  .fav-chip button.fav-go{
+    padding:0.2rem 0.5rem;
+    font-size:0.68rem;
+    border:none;
+    color:var(--amber);
+  }
+  .fav-chip button.fav-go:hover{color:var(--text); border-color:transparent;}
+  .fav-chip button.fav-del{
+    padding:0.2rem 0.45rem;
+    font-size:0.7rem;
+    border:none;
+    color:var(--text-dim);
+    line-height:1;
+  }
+  .fav-chip button.fav-del:hover{color:var(--red); border-color:transparent;}
+  .fav-empty{
+    font-family:var(--mono);
+    font-size:0.68rem;
+    color:var(--text-dim);
+  }
+
+  .hidden{display:none !important;}
+  .no-conn{
+    font-family:var(--mono);
+    font-size:0.78rem;
+    color:var(--text-dim);
+    text-align:center;
+    padding:2.5rem 1rem;
+    border:1px dashed var(--panel-edge);
+    border-radius:3px;
+  }
+
+  .log-details{
+    margin-top:1rem;
+    margin-bottom:1rem;
+  }
+  .log-details summary{
+    cursor:pointer;
+    font-family:var(--mono);
+    font-size:0.68rem;
+    letter-spacing:0.14em;
+    text-transform:uppercase;
+    color:var(--text-dim);
+    margin:0 0 0.9rem;
+    user-select:none;
+    list-style:none;
+  }
+  .log-details summary::-webkit-details-marker{display:none;}
+  .log-details summary::before{
+    content:'▶ ';
+    display:inline-block;
+    transition:transform .15s ease;
+  }
+  .log-details[open] summary::before{
+    content:'▼ ';
+  }
+  .log-details summary:hover{color:var(--amber);}
+  .log-box{
+    max-height:260px;
+    overflow-y:auto;
+    font-family:var(--mono);
+    font-size:0.72rem;
+    line-height:1.6;
+    color:var(--text-dim);
+  }
+  .log-box .log-entry{white-space:pre-wrap;}
+  .log-box .log-ts{color:var(--text-dim); opacity:0.7;}
+  .log-empty{color:var(--text-dim);}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div>
+      <h1>Amplificador FM — Consola</h1>
+      <div class="sub">esRadio Albacete 102.7 FM · protocolo Seratel</div>
+    </div>
+    <div class="link-status">
+      <span class="dot" id="link-dot"></span>
+      <span id="link-text">Desconectado</span>
+    </div>
+  </header>
+
+  <div class="panel" style="margin-bottom:1rem;">
+    <h2>Conexión</h2>
+    <div class="conn-row">
+      <label class="conn-field">
+        <span>Transporte</span>
+        <select id="conn-transport">
+          <option value="tcp">Red (ser2net)</option>
+          <option value="serial">Serie directo (mismo equipo)</option>
+        </select>
+      </label>
+      <span id="tcp-fields">
+        <label class="conn-field">
+          <span>IP</span>
+          <input type="text" id="conn-host" placeholder="100.113.52.81" autocomplete="off">
+        </label>
+        <label class="conn-field conn-field-port">
+          <span>Puerto</span>
+          <input type="number" id="conn-port" placeholder="3002" min="1" max="65535" autocomplete="off">
+        </label>
+      </span>
+      <span id="serial-fields" class="hidden">
+        <label class="conn-field">
+          <span>Dispositivo</span>
+          <input type="text" id="conn-device" placeholder="/dev/ttyUSB0" autocomplete="off">
+        </label>
+      </span>
+      <button id="btn-connect">Conectar</button>
+      <button id="btn-disconnect" class="danger" disabled>Desconectar</button>
+      <button id="btn-fav-add" title="Guardar la conexión actual como favorito">☆ Guardar favorito</button>
+    </div>
+    <div class="toast" id="conn-toast"></div>
+    <div class="conn-note" id="serial-note" style="display:none;">
+      ⚠️ Modo serie directo: usa el mismo puerto físico que ser2net (para
+      SupCE). No conectes por los dos sitios a la vez — las tramas de
+      ambos maestros pueden mezclarse en la línea.
+    </div>
+    <div class="fav-row" id="fav-row"></div>
+  </div>
+
+  <div class="no-conn" id="no-conn-placeholder">Sin conexión — conecta con un equipo para ver sus datos</div>
+
+  <div id="data-panels" class="hidden">
+  <div class="grid3">
+    <div class="panel">
+      <h2>Alarmas generales</h2>
+      <div id="alarms-list">
+        <div class="alarm-row" id="alm-row-exc"><span class="led" id="alm-exc"></span><span class="name">EXC. Power</span></div>
+        <div class="alarm-row" id="alm-row-fwd"><span class="led" id="alm-fwd"></span><span class="name">FWD Power</span></div>
+        <div class="alarm-row" id="alm-row-rfl"><span class="led" id="alm-rfl"></span><span class="name">RFL Power</span></div>
+        <div class="alarm-row" id="alm-row-temp"><span class="led" id="alm-temp"></span><span class="name">Temp. Combiner</span></div>
+        <div class="alarm-row" id="alm-row-permfail"><span class="led" id="alm-permfail"></span><span class="name">Permanent Fail</span></div>
+        <div class="alarm-row" id="alm-row-interlock"><span class="led" id="alm-interlock"></span><span class="name">Ext. Interlock</span></div>
+        <div class="alarm-row" id="alm-row-cup"><span class="led" id="alm-cup"></span><span class="name">Control Unit Power</span></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Amplificadores</h2>
+      <table class="amps-table">
+        <thead>
+          <tr><th>M</th><th class="amp-led-col">°C</th><th class="amp-led-col">I</th><th>IDC</th><th class="num">A</th></tr>
+        </thead>
+        <tbody id="amps-body">
+          <tr><td class="n">1</td><td class="amp-led-col"><span class="led"></span></td><td class="amp-led-col"><span class="led" data-cur-alm="0"></span></td><td class="bar-cell"><div class="amp-bar-track"><div class="amp-bar-fill" data-amp="0"></div></div></td><td class="num" data-amp-val="0">—</td></tr>
+          <tr><td class="n">2</td><td class="amp-led-col"><span class="led"></span></td><td class="amp-led-col"><span class="led" data-cur-alm="1"></span></td><td class="bar-cell"><div class="amp-bar-track"><div class="amp-bar-fill" data-amp="1"></div></div></td><td class="num" data-amp-val="1">—</td></tr>
+          <tr><td class="n">3</td><td class="amp-led-col"><span class="led"></span></td><td class="amp-led-col"><span class="led" data-cur-alm="2"></span></td><td class="bar-cell"><div class="amp-bar-track"><div class="amp-bar-fill" data-amp="2"></div></div></td><td class="num" data-amp-val="2">—</td></tr>
+          <tr><td class="n">4</td><td class="amp-led-col"><span class="led"></span></td><td class="amp-led-col"><span class="led" data-cur-alm="3"></span></td><td class="bar-cell"><div class="amp-bar-track"><div class="amp-bar-fill" data-amp="3"></div></div></td><td class="num" data-amp-val="3">—</td></tr>
+          <tr><td class="n">5</td><td class="amp-led-col"><span class="led"></span></td><td class="amp-led-col"><span class="led" data-cur-alm="4"></span></td><td class="bar-cell"><div class="amp-bar-track"><div class="amp-bar-fill" data-amp="4"></div></div></td><td class="num" data-amp-val="4">—</td></tr>
+          <tr><td class="n">6</td><td class="amp-led-col"><span class="led"></span></td><td class="amp-led-col"><span class="led" data-cur-alm="5"></span></td><td class="bar-cell"><div class="amp-bar-track"><div class="amp-bar-fill" data-amp="5"></div></div></td><td class="num" data-amp-val="5">—</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="panel">
+      <h2>Medidas</h2>
+      <div class="reading">
+        <span class="val" id="fwd-val">—</span>
+        <span class="unit">W</span>
+      </div>
+      <div class="meter-track"><div class="meter-fill" id="fwd-meter"></div></div>
+      <div class="meter-caption">FWD Power · rango 0–5000 W</div>
+
+      <div class="stat-row" style="margin-top:1rem;">
+        <span class="label">RFL Power</span>
+        <span class="value" id="rfl-val">N/D</span>
+      </div>
+      <div class="stat-row">
+        <span class="label">Tensión DC</span>
+        <span class="value" id="vdc-val">— V</span>
+      </div>
+      <div class="stat-row">
+        <span class="label">Última lectura</span>
+        <span class="value" id="ts-val">—</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid2">
+    <div class="panel">
+      <h2>Control de potencia</h2>
+      <div style="font-family:var(--mono); font-size:0.72rem; color:var(--text-dim); line-height:1.5;">
+        Sube o baja la potencia poco a poco, o fija directamente un porcentaje de la potencia máxima.
+      </div>
+      <div class="actions">
+        <button id="btn-power-down" class="power">▼ Disminuir</button>
+        <button id="btn-power-up" class="power">▲ Aumentar</button>
+      </div>
+      <div class="actions" id="power-presets">
+        <button data-pct="40">40%</button>
+        <button data-pct="50">50%</button>
+        <button data-pct="60">60%</button>
+        <button data-pct="70">70%</button>
+        <button data-pct="80">80%</button>
+        <button data-pct="90">90%</button>
+        <button id="btn-power-max">Máxima</button>
+      </div>
+      <div class="toast" id="power-toast"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Pulsadores de control remoto</h2>
+      <div style="font-family:var(--mono); font-size:0.72rem; color:var(--text-dim); line-height:1.5;">
+        Reset limpia las alarmas activas. Start pone el transmisor al aire y Stop lo detiene.
+      </div>
+      <div class="actions">
+        <button id="btn-start" class="danger">Start</button>
+        <button id="btn-stop" class="danger">Stop</button>
+        <button id="btn-reset">Reset</button>
+      </div>
+      <div class="toast" id="action-toast"></div>
+    </div>
+  </div>
+  </div>
+
+  <details class="panel log-details" open>
+    <summary>Log</summary>
+    <div class="log-box" id="log-box"><span class="log-empty">Sin actividad todavía</span></div>
+  </details>
+
+  <footer>lectura directa vía puerto serie · sustituto de SupCE 1.4c</footer>
+</div>
+
+<script>
+// La API bajo /api requiere la cabecera X-API-Key; el servidor inyecta la
+// key aquí al servir esta página (solo confía en quien puede llegar a "/",
+// protegido por Tailscale). Consumidores externos deben mandar su propia
+// X-API-Key en vez de cargar esta página.
+const API_KEY = "%%API_KEY%%";
+const _fetch = window.fetch.bind(window);
+window.fetch = (input, init = {}) => {
+  const url = typeof input === 'string' ? input : input.url;
+  if (url.startsWith('/api/')) {
+    init = { ...init, headers: { ...(init.headers || {}), 'X-API-Key': API_KEY } };
+  }
+  return _fetch(input, init);
+};
+
+const fmtNum = (n, d=0) => (n === null || n === undefined) ? '—' : Number(n).toFixed(d);
+
+// Traduce el byte de ACK (2º byte de la respuesta) a un mensaje legible.
+// Confirmado por ingeniería inversa estática de SUPCE.EXE (no solo por
+// captura): todos estos bytes caen en la misma rama "OK" del parser de
+// respuestas de SupCE — no existe ningún código de rechazo distinto,
+// ver COMANDOS_SERATEL.md §7.3.
+const ACK_MEANINGS = {
+  '50': 'OK — preset/máxima aceptado',
+  '73': 'OK — alarmas reiniciadas',
+  '70': 'OK — parado',
+  '64': 'OK — potencia bajada',
+  '62': 'OK (sin asignar aún: subir potencia o start)',
+  '7c': 'OK (sin asignar aún: subir potencia o start)',
+};
+
+function describeAck(rawHex) {
+  if (!rawHex || rawHex.length < 4) return rawHex ? `${rawHex} (sin decodificar)` : '(sin respuesta)';
+  const ackByte = rawHex.slice(2, 4);
+  const meaning = ACK_MEANINGS[ackByte];
+  return meaning ? `${meaning} [${rawHex}]` : `Desconocido [${rawHex}]`;
+}
+
+let defaultsLoaded = false;
+let inFlightAction = false;
+
+function addLog(msg) {
+  const box = document.getElementById('log-box');
+  const empty = box.querySelector('.log-empty');
+  if (empty) empty.remove();
+  const ts = new Date().toLocaleTimeString('es-ES');
+  const entry = document.createElement('div');
+  entry.className = 'log-entry';
+  const tsSpan = document.createElement('span');
+  tsSpan.className = 'log-ts';
+  tsSpan.textContent = `[${ts}] `;
+  entry.appendChild(tsSpan);
+  entry.appendChild(document.createTextNode(msg));
+  box.prepend(entry);
+  while (box.children.length > 200) box.removeChild(box.lastChild);
+}
+
+function setConnUiState(connecting, connected) {
+  document.getElementById('btn-connect').disabled = connecting || connected;
+  document.getElementById('btn-disconnect').disabled = connecting || !connected;
+  document.getElementById('conn-transport').disabled = connecting || connected;
+  document.getElementById('conn-host').disabled = connecting || connected;
+  document.getElementById('conn-port').disabled = connecting || connected;
+  document.getElementById('conn-device').disabled = connecting || connected;
+  document.getElementById('btn-power-up').disabled = !connected;
+  document.getElementById('btn-power-down').disabled = !connected;
+  document.getElementById('btn-reset').disabled = !connected;
+  document.getElementById('btn-stop').disabled = !connected;
+  document.getElementById('btn-start').disabled = !connected;
+  document.querySelectorAll('#power-presets button').forEach(b => b.disabled = !connected);
+
+  document.getElementById('data-panels').classList.toggle('hidden', !connected);
+  document.getElementById('no-conn-placeholder').classList.toggle('hidden', connected);
+}
+
+function updateTransportFields() {
+  const isSerial = document.getElementById('conn-transport').value === 'serial';
+  document.getElementById('tcp-fields').classList.toggle('hidden', isSerial);
+  document.getElementById('serial-fields').classList.toggle('hidden', !isSerial);
+  document.getElementById('serial-note').style.display = isSerial ? '' : 'none';
+}
+document.getElementById('conn-transport').addEventListener('change', updateTransportFields);
+updateTransportFields();
+
+function setAlarmLed(ledId, rowId, isAlarm) {
+  const led = document.getElementById(ledId);
+  const row = document.getElementById(rowId);
+  led.className = isAlarm ? 'led alarm' : 'led';
+  row.className = 'alarm-row' + (isAlarm ? ' is-alarm' : '');
+}
+
+async function poll() {
+  try {
+    const res = await fetch('/api/status');
+    const data = await res.json();
+
+    if (!defaultsLoaded) {
+      const hostInput = document.getElementById('conn-host');
+      const portInput = document.getElementById('conn-port');
+      const deviceInput = document.getElementById('conn-device');
+      if (!hostInput.value) hostInput.value = data.host || data.default_host || '';
+      if (!portInput.value) portInput.value = data.port || data.default_port || '';
+      if (!deviceInput.value) deviceInput.value = data.device || data.default_device || '';
+      if (data.transport) {
+        document.getElementById('conn-transport').value = data.transport;
+        updateTransportFields();
+      }
+      defaultsLoaded = true;
+    }
+
+    const dot = document.getElementById('link-dot');
+    const text = document.getElementById('link-text');
+    if (data.connected) {
+      dot.className = 'dot ok';
+      const connTarget = data.transport === 'serial' ? data.device : `${data.host}:${data.port}`;
+      text.textContent = `Conectado — ${connTarget} (${data.transport})`;
+    } else if (data.connecting) {
+      dot.className = 'dot';
+      text.textContent = 'Conectando…';
+    } else {
+      dot.className = data.last_error ? 'dot bad' : 'dot';
+      text.textContent = data.last_error ? 'Error de conexión' : 'Desconectado';
+    }
+
+    if (!inFlightAction) {
+      setConnUiState(data.connecting, data.connected);
+    }
+
+    if (data.measurements) {
+      const m = data.measurements;
+      document.getElementById('fwd-val').textContent = fmtNum(m.fwd_power_w);
+      const pct = Math.min(100, (m.fwd_power_w / 5000) * 100);
+      document.getElementById('fwd-meter').style.width = pct + '%';
+      document.getElementById('vdc-val').textContent = fmtNum(m.vdc_volts, 1) + ' V';
+      document.getElementById('ts-val').textContent = m.timestamp;
+
+      m.idc_amps.forEach((a, i) => {
+        const bar = document.querySelector(`.amp-bar-fill[data-amp="${i}"]`);
+        const val = document.querySelector(`[data-amp-val="${i}"]`);
+        if (bar) bar.style.width = Math.min(100, (a / 30) * 100) + '%';
+        if (val) val.textContent = a + ' A';
+      });
+
+      if (m.current_alarms) {
+        m.current_alarms.forEach((isAlarm, i) => {
+          const led = document.querySelector(`[data-cur-alm="${i}"]`);
+          if (led) led.className = isAlarm ? 'led alarm' : 'led';
+        });
+      }
+    }
+
+    if (data.alarms) {
+      setAlarmLed('alm-interlock', 'alm-row-interlock', data.alarms.ext_interlock_alarm);
+      setAlarmLed('alm-exc', 'alm-row-exc', data.alarms.exc_power_alarm);
+      setAlarmLed('alm-fwd', 'alm-row-fwd', data.alarms.fwd_power_alarm);
+      setAlarmLed('alm-rfl', 'alm-row-rfl', data.alarms.rfl_power_alarm);
+      setAlarmLed('alm-temp', 'alm-row-temp', data.alarms.temp_combiner_alarm);
+      setAlarmLed('alm-permfail', 'alm-row-permfail', data.alarms.permanent_fail_alarm);
+      setAlarmLed('alm-cup', 'alm-row-cup', data.alarms.control_unit_power_alarm);
+    }
+  } catch (e) {
+    document.getElementById('link-dot').className = 'dot bad';
+    document.getElementById('link-text').textContent = 'Error de red';
+  }
+}
+
+const FAV_KEY = 'seratel_favoritos';
+
+function loadFavs() {
+  try {
+    return JSON.parse(localStorage.getItem(FAV_KEY)) || [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function saveFavs(favs) {
+  localStorage.setItem(FAV_KEY, JSON.stringify(favs));
+}
+
+function renderFavs() {
+  const row = document.getElementById('fav-row');
+  const favs = loadFavs();
+  row.innerHTML = '';
+  if (favs.length === 0) {
+    row.innerHTML = '<span class="fav-empty">Sin favoritos guardados</span>';
+    return;
+  }
+  favs.forEach((fav, i) => {
+    const chip = document.createElement('span');
+    chip.className = 'fav-chip';
+
+    const goBtn = document.createElement('button');
+    goBtn.className = 'fav-go';
+    const favTarget = fav.transport === 'serial' ? fav.device : `${fav.host}:${fav.port}`;
+    goBtn.textContent = `${fav.name} (${favTarget})`;
+    goBtn.addEventListener('click', () => connectToFav(fav));
+    chip.appendChild(goBtn);
+
+    const delBtn = document.createElement('button');
+    delBtn.className = 'fav-del';
+    delBtn.textContent = '✕';
+    delBtn.title = 'Eliminar favorito';
+    delBtn.addEventListener('click', () => {
+      const current = loadFavs();
+      current.splice(i, 1);
+      saveFavs(current);
+      renderFavs();
+    });
+    chip.appendChild(delBtn);
+
+    row.appendChild(chip);
+  });
+}
+
+function connectToFav(fav) {
+  document.getElementById('conn-transport').value = fav.transport || 'tcp';
+  updateTransportFields();
+  document.getElementById('conn-host').value = fav.host || '';
+  document.getElementById('conn-port').value = fav.port || '';
+  document.getElementById('conn-device').value = fav.device || '';
+  document.getElementById('btn-connect').click();
+}
+
+document.getElementById('btn-fav-add').addEventListener('click', () => {
+  const toast = document.getElementById('conn-toast');
+  const transport = document.getElementById('conn-transport').value;
+  const host = document.getElementById('conn-host').value.trim();
+  const port = parseInt(document.getElementById('conn-port').value, 10);
+  const device = document.getElementById('conn-device').value.trim();
+
+  if (transport === 'tcp' && (!host || !port)) {
+    toast.className = 'toast err';
+    toast.textContent = 'Introduce IP y puerto antes de guardar el favorito';
+    return;
+  }
+  if (transport === 'serial' && !device) {
+    toast.className = 'toast err';
+    toast.textContent = 'Introduce el dispositivo antes de guardar el favorito';
+    return;
+  }
+
+  const defaultName = transport === 'serial' ? device : `${host}:${port}`;
+  const name = prompt('Nombre del equipo', defaultName);
+  if (!name) return;
+
+  const favs = loadFavs();
+  favs.push({ name: name.trim(), transport, host, port, device });
+  saveFavs(favs);
+  renderFavs();
+  toast.className = 'toast ok';
+  toast.textContent = `Favorito "${name.trim()}" guardado`;
+});
+
+renderFavs();
+
+document.getElementById('btn-connect').addEventListener('click', async () => {
+  const toast = document.getElementById('conn-toast');
+  const transport = document.getElementById('conn-transport').value;
+  const host = document.getElementById('conn-host').value.trim();
+  const port = parseInt(document.getElementById('conn-port').value, 10);
+  const device = document.getElementById('conn-device').value.trim();
+
+  let payload, target;
+  if (transport === 'serial') {
+    if (!device) {
+      toast.className = 'toast err';
+      toast.textContent = 'Introduce el dispositivo serie (ej. /dev/ttyUSB0)';
+      return;
+    }
+    payload = { device };
+    target = device;
+  } else {
+    if (!host || !port) {
+      toast.className = 'toast err';
+      toast.textContent = 'Introduce IP y puerto válidos';
+      return;
+    }
+    payload = { host, port };
+    target = `${host}:${port}`;
+  }
+
+  inFlightAction = true;
+  setConnUiState(true, false);
+  toast.className = 'toast';
+  toast.textContent = `Conectando a ${target}…`;
+
+  try {
+    const res = await fetch('/api/connect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      const connectedTarget = data.transport === 'serial' ? data.device : `${data.host}:${data.port}`;
+      toast.className = 'toast ok';
+      toast.textContent = `Conectado a ${connectedTarget}`;
+      addLog(`Conectado a ${connectedTarget} (${data.transport})`);
+    } else {
+      toast.className = 'toast err';
+      toast.textContent = 'No se pudo conectar';
+      addLog(`Error al conectar a ${target} — ` + (data.detail || 'desconocido'));
+    }
+  } catch (e) {
+    toast.className = 'toast err';
+    toast.textContent = 'Error de red al conectar';
+    addLog(`Error de red al conectar a ${target}`);
+  }
+  inFlightAction = false;
+  await poll();
+});
+
+document.getElementById('btn-disconnect').addEventListener('click', async () => {
+  const toast = document.getElementById('conn-toast');
+  inFlightAction = true;
+  setConnUiState(false, true);
+  document.getElementById('btn-disconnect').disabled = true;
+  try {
+    await fetch('/api/disconnect', { method: 'POST' });
+    toast.className = 'toast';
+    toast.textContent = 'Desconectado';
+    addLog('Desconectado');
+  } catch (e) {
+    toast.className = 'toast err';
+    toast.textContent = 'Error de red al desconectar';
+    addLog('Error de red al desconectar');
+  }
+  inFlightAction = false;
+  await poll();
+});
+
+document.getElementById('btn-reset').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-reset');
+  const toast = document.getElementById('action-toast');
+  btn.disabled = true;
+  toast.textContent = 'Enviando reset…';
+  try {
+    const res = await fetch('/api/reset', { method: 'POST' });
+    const data = await res.json();
+    if (res.ok) {
+      toast.textContent = 'Alarmas reiniciadas';
+      addLog(`Reset enviado — ack: ${data.ack_hex}`);
+    } else {
+      toast.textContent = 'Error al enviar reset';
+      addLog('Error al enviar reset — ' + (data.detail || 'desconocido'));
+    }
+  } catch (e) {
+    toast.textContent = 'Error de red al enviar reset';
+    addLog('Error de red al enviar reset');
+  }
+  btn.disabled = false;
+});
+
+document.getElementById('btn-stop').addEventListener('click', async () => {
+  if (!confirm('¿Seguro que quieres parar la emisión?')) return;
+  const btn = document.getElementById('btn-stop');
+  const toast = document.getElementById('action-toast');
+  btn.disabled = true;
+  toast.textContent = 'Parando…';
+  try {
+    const res = await fetch('/api/stop', { method: 'POST' });
+    const data = await res.json();
+    if (res.ok) {
+      toast.textContent = 'Transmisión detenida';
+      addLog(`Stop enviado — ${describeAck(data.raw_hex)}`);
+    } else {
+      toast.textContent = 'Error al parar';
+      addLog('Error al enviar Stop — ' + (data.detail || 'desconocido'));
+    }
+  } catch (e) {
+    toast.textContent = 'Error de red al parar';
+    addLog('Error de red al enviar Stop');
+  }
+  btn.disabled = false;
+});
+
+document.getElementById('btn-start').addEventListener('click', async () => {
+  if (!confirm('¿Seguro que quieres arrancar la emisión?')) return;
+  const btn = document.getElementById('btn-start');
+  const toast = document.getElementById('action-toast');
+  btn.disabled = true;
+  toast.textContent = 'Arrancando…';
+  try {
+    const res = await fetch('/api/start', { method: 'POST' });
+    const data = await res.json();
+    if (res.ok) {
+      toast.textContent = 'Transmisor arrancado';
+      addLog(`Start enviado — ${describeAck(data.raw_hex)}`);
+    } else {
+      toast.textContent = 'Error al arrancar';
+      addLog('Error al enviar Start — ' + (data.detail || 'desconocido'));
+    }
+  } catch (e) {
+    toast.textContent = 'Error de red al arrancar';
+    addLog('Error de red al enviar Start');
+  }
+  btn.disabled = false;
+});
+
+async function sendPower(direction, endpoint, btnId) {
+  const btn = document.getElementById(btnId);
+  const toast = document.getElementById('power-toast');
+  btn.disabled = true;
+  toast.className = 'toast';
+  toast.textContent = `Ajustando potencia…`;
+  try {
+    const res = await fetch(endpoint, { method: 'POST' });
+    const data = await res.json();
+    if (res.ok) {
+      const ackByte = (data.raw_hex || '').slice(2, 4);
+      const ok = !!ACK_MEANINGS[ackByte];
+      toast.className = ok ? 'toast ok' : 'toast err';
+      toast.textContent = direction === 'subir' ? 'Potencia subida' : 'Potencia bajada';
+      addLog(`Potencia ${direction} — ${describeAck(data.raw_hex)}`);
+    } else {
+      toast.className = 'toast err';
+      toast.textContent = 'Error al ajustar potencia';
+      addLog(`Error al ${direction} potencia — ` + (data.detail || 'desconocido'));
+    }
+  } catch (e) {
+    toast.className = 'toast err';
+    toast.textContent = 'Error de red';
+    addLog(`Error de red al ${direction} potencia`);
+  }
+  btn.disabled = false;
+}
+
+document.getElementById('btn-power-up').addEventListener('click', () => sendPower('subir', '/api/power/up', 'btn-power-up'));
+document.getElementById('btn-power-down').addEventListener('click', () => sendPower('bajar', '/api/power/down', 'btn-power-down'));
+
+document.querySelectorAll('#power-presets button[data-pct]').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    const pct = parseInt(btn.dataset.pct, 10);
+    const toast = document.getElementById('power-toast');
+    document.querySelectorAll('#power-presets button').forEach(b => b.disabled = true);
+    toast.className = 'toast';
+    toast.textContent = `Fijando potencia al ${pct}%…`;
+    try {
+      const res = await fetch('/api/power/set', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ percent: pct }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        const ackByte = (data.raw_hex || '').slice(2, 4);
+        toast.className = ACK_MEANINGS[ackByte] ? 'toast ok' : 'toast err';
+        toast.textContent = `Potencia fijada al ${pct}%`;
+        addLog(`Potencia fijada al ${pct}% — ${describeAck(data.raw_hex)}`);
+      } else {
+        toast.className = 'toast err';
+        toast.textContent = 'Error al fijar potencia';
+        addLog(`Error al fijar potencia al ${pct}% — ` + (data.detail || 'desconocido'));
+      }
+    } catch (e) {
+      toast.className = 'toast err';
+      toast.textContent = 'Error de red';
+      addLog(`Error de red al fijar potencia al ${pct}%`);
+    }
+    document.querySelectorAll('#power-presets button').forEach(b => b.disabled = false);
+  });
+});
+
+document.getElementById('btn-power-max').addEventListener('click', async () => {
+  const toast = document.getElementById('power-toast');
+  document.querySelectorAll('#power-presets button').forEach(b => b.disabled = true);
+  toast.className = 'toast';
+  toast.textContent = 'Fijando potencia máxima…';
+  try {
+    const res = await fetch('/api/power/max', { method: 'POST' });
+    const data = await res.json();
+    if (res.ok) {
+      const ackByte = (data.raw_hex || '').slice(2, 4);
+      toast.className = ACK_MEANINGS[ackByte] ? 'toast ok' : 'toast err';
+      toast.textContent = 'Potencia máxima fijada';
+      addLog(`Potencia máxima fijada — ${describeAck(data.raw_hex)}`);
+    } else {
+      toast.className = 'toast err';
+      toast.textContent = 'Error al fijar potencia máxima';
+      addLog('Error al fijar potencia máxima — ' + (data.detail || 'desconocido'));
+    }
+  } catch (e) {
+    toast.className = 'toast err';
+    toast.textContent = 'Error de red';
+    addLog('Error de red al fijar potencia máxima');
+  }
+  document.querySelectorAll('#power-presets button').forEach(b => b.disabled = false);
+});
+
+poll();
+setInterval(poll, 1500);
+</script>
+</body>
+</html>

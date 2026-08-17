@@ -1,0 +1,21 @@
+services:
+  seratel-webapp:
+    build: .
+    container_name: seratel-webapp
+    restart: unless-stopped
+    network_mode: host   # así 127.0.0.1 apunta al ser2net que corre en la propia Raspberry
+    devices:
+      # Necesario para el modo "serial" (acceso directo al puerto, sin
+      # pasar por ser2net). network_mode: host NO comparte dispositivos,
+      # hay que mapearlo explícitamente.
+      - "${SERIAL_DEVICE}:${SERIAL_DEVICE}"
+    env_file:
+      - .env
+    environment:
+      - SER2NET_HOST=${SER2NET_HOST}
+      - SER2NET_PORT=${SER2NET_PORT}
+      - SERIAL_DEVICE=${SERIAL_DEVICE}
+      - SERIAL_BAUDRATE=${SERIAL_BAUDRATE}
+      - POLL_INTERVAL=${POLL_INTERVAL}
+      - HISTORY_MAX_POINTS=${HISTORY_MAX_POINTS}
+      - API_KEY=${API_KEY}

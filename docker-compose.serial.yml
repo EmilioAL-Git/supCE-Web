@@ -1,0 +1,7 @@
+services:
+  seratel-webapp:
+    devices:
+      # Necesario para el modo "serial" (acceso directo al puerto, sin pasar
+      # por ser2net). network_mode: host NO comparte dispositivos, hay que
+      # mapearlo explícitamente.
+      - "${SERIAL_DEVICE}:${SERIAL_DEVICE}"

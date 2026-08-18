@@ -3,9 +3,10 @@
 Registro completo de la investigación: qué se ha confirmado, cómo, y
 qué queda pendiente. Para la referencia rápida de comandos (formato
 trama a trama, listos para copiar/pegar), ver
-[COMANDOS_SERATEL.md](COMANDOS_SERATEL.md). Este documento es el
-relato de cómo se llegó a cada cosa y por qué se puede confiar en ella
-(o no).
+[COMANDOS_SERATEL.md](COMANDOS_SERATEL.md). Para la API HTTP/JSON que
+expone la app por encima de este protocolo (endpoints, auth, ejemplos
+`curl`), ver [API.md](API.md). Este documento es el relato de cómo se
+llegó a cada cosa y por qué se puede confiar en ella (o no).
 
 ## 1. Objetivo y arquitectura
 

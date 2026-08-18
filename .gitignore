@@ -3,3 +3,4 @@ __pycache__/
 *.pyc
 SUPCE14/
 *.pcap
+n8n/Amplificador_Seratel_-_Control_y_Dashboard.json

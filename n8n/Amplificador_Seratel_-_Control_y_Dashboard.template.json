@@ -1,0 +1,605 @@
+{
+  "name": "Amplificador Seratel - Control y Dashboard (TEMPLATE)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "9afae6bb-b459-4e1c-9c14-e410c9eee9e6",
+      "name": "Cada minuto (dashboard)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1120,
+        -280
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// CONFIG — esta instancia de n8n bloquea $env en nodos Code, así que va literal aquí\nconst API_URL = 'http://IP_TAILSCALE_RASPBERRY:8000/api';\nconst API_KEY = 'PON_AQUI_TU_API_KEY';\nconst CHAT_ID = 0; // sustituye por tu chat_id de Telegram\n\nconst staticData = $getWorkflowStaticData('global');\n\nasync function apiGet(path) {\n  const res = await fetch(`${API_URL}${path}`, { headers: { 'X-API-Key': API_KEY } });\n  if (!res.ok) throw new Error(`API ${path} -> HTTP ${res.status}`);\n  return res.json();\n}\n\nfunction fmtNum(n, d = 0) {\n  return (n === null || n === undefined) ? '—' : Number(n).toFixed(d);\n}\n\nconst ALARM_LABELS = {\n  rfl_power_alarm: 'RFL Power',\n  fwd_power_alarm: 'FWD Power',\n  exc_power_alarm: 'EXC. Power',\n  temp_combiner_alarm: 'Temp. Combiner',\n  permanent_fail_alarm: 'Permanent Fail',\n  ext_interlock_alarm: 'Ext. Interlock',\n  control_unit_power_alarm: 'Control Unit Power',\n};\n\nlet status;\nlet apiError = null;\ntry {\n  status = await apiGet('/status');\n} catch (e) {\n  apiError = e.message;\n}\n\nif (apiError) {\n  return [{\n    json: {\n      action: 'dashboard',\n      chatId: CHAT_ID,\n      hasPinned: !!staticData.pinnedMessageId,\n      text: `⚠️ <b>Amplificador FM</b>\\nNo se pudo consultar la API: ${apiError}`,\n    },\n  }];\n}\n\nconst events = [];\nconst wasConnected = staticData.lastConnected === true;\nconst nowConnected = !!status.connected;\n\n// --- Texto del dashboard ---\nconst lines = [];\nlines.push('📻 <b>Amplificador FM — esRadio Albacete</b>');\nif (nowConnected) {\n  const target = status.transport === 'serial' ? status.device : `${status.host}:${status.port}`;\n  lines.push(`🟢 Conectado (${status.transport}) — <code>${target}</code>`);\n} else {\n  lines.push(`⚪ Desconectado${status.last_error ? ` — ${status.last_error}` : ''}`);\n}\n\nconst m = status.measurements;\nconst a = status.alarms;\n\nif (m) {\n  lines.push('');\n  lines.push(`⚡ FWD: <b>${fmtNum(m.fwd_power_w)} W</b> · DC: ${fmtNum(m.vdc_volts, 1)} V`);\n  const amps = m.idc_amps.map((c, i) => `A${i + 1}:${c}${m.current_alarms && m.current_alarms[i] ? '⚠️' : ''}`).join('  ');\n  lines.push(`🔋 ${amps}`);\n}\n\nif (a) {\n  const activas = Object.entries(ALARM_LABELS).filter(([k]) => a[k]).map(([, v]) => v);\n  lines.push('');\n  lines.push(activas.length ? `🚨 <b>Alarmas:</b> ${activas.join(', ')}` : '✅ Sin alarmas activas');\n}\n\nlines.push('');\nlines.push(`<i>Actualizado: ${new Date().toLocaleString('es-ES', { timeZone: 'Europe/Madrid' })}</i>`);\n\nevents.push({\n  json: {\n    action: 'dashboard',\n    chatId: CHAT_ID,\n    hasPinned: !!staticData.pinnedMessageId,\n    text: lines.join('\\n'),\n  },\n});\n\n// --- Detección de eventos (transición de alarmas / conexión) ---\nif (a) {\n  const prevAlarms = staticData.lastAlarms || {};\n  for (const [key, label] of Object.entries(ALARM_LABELS)) {\n    const now = !!a[key];\n    const before = !!prevAlarms[key];\n    if (now && !before) {\n      events.push({ json: { action: 'alerta', chatId: CHAT_ID, text: `🚨 <b>Alarma activada:</b> ${label}` } });\n    } else if (!now && before) {\n      events.push({ json: { action: 'alerta', chatId: CHAT_ID, text: `✅ <b>Alarma resuelta:</b> ${label}` } });\n    }\n  }\n  staticData.lastAlarms = a;\n}\n\nif (nowConnected && !wasConnected) {\n  events.push({ json: { action: 'alerta', chatId: CHAT_ID, text: `🟢 <b>Conectado</b> al amplificador (${status.transport})` } });\n} else if (!nowConnected && wasConnected) {\n  events.push({ json: { action: 'alerta', chatId: CHAT_ID, text: `⚪ <b>Desconectado</b> del amplificador${status.last_error ? ` — ${status.last_error}` : ''}` } });\n}\nstaticData.lastConnected = nowConnected;\n\nreturn events;\n"
+      },
+      "id": "accfba6c-f810-465f-8720-5b221fbc79d2",
+      "name": "Leer estado y preparar dashboard",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -880,
+        -280
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "bd1613f2-78c2-4a95-b5a8-bead9d3ac180",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "dashboard",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": false
+      },
+      "id": "3284a150-121e-4863-b368-62b9cdc48595",
+      "name": "¿Es evento de dashboard?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -640,
+        -280
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "27355c60-2389-49f6-949e-ac5833e68867",
+              "leftValue": "={{ $json.hasPinned }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": false
+      },
+      "id": "ee8d3a3c-0776-4138-b32b-a1f8b9a54d88",
+      "name": "¿Hay mensaje fijado?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -380,
+        -360
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "editMessageText",
+        "chatId": "={{ $json.chatId }}",
+        "messageId": "={{ $json.messageId }}",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "ec1f7197-bc98-4598-b8d9-9f50f5370512",
+      "name": "Editar dashboard",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -140,
+        -420
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "PON_TU_CREDENCIAL",
+          "name": "SeratelControl-bot"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chatId }}",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "4f273a9c-e4e5-4e96-9873-026b86ca5a21",
+      "name": "Enviar dashboard",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -140,
+        -280
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "PON_TU_CREDENCIAL",
+          "name": "SeratelControl-bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const staticData = $getWorkflowStaticData('global');\nstaticData.pinnedMessageId = $input.first().json.message_id;\nreturn $input.all();\n"
+      },
+      "id": "11d457e4-b417-4966-aad0-2f7e02d22741",
+      "name": "Guardar ID de mensaje",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        100,
+        -280
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chatId }}",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "b3e144a5-6a66-4c1e-a6f5-2a0ba6e1c6ae",
+      "name": "Enviar evento",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -380,
+        -140
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "PON_TU_CREDENCIAL",
+          "name": "SeratelControl-bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "updates": [
+          "message",
+          "callback_query"
+        ]
+      },
+      "id": "3a6219b5-226f-4f1f-afdb-ccf1ffe9cf18",
+      "name": "Comandos y botones",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -1120,
+        240
+      ],
+      "webhookId": "d30abfa5-6154-41dc-8390-78b4fd303ef5",
+      "credentials": {
+        "telegramApi": {
+          "id": "PON_TU_CREDENCIAL",
+          "name": "SeratelControl-bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// CONFIG — esta instancia de n8n bloquea $env en nodos Code, así que va literal aquí\nconst API_URL = 'http://IP_TAILSCALE_RASPBERRY:8000/api';\nconst API_KEY = 'PON_AQUI_TU_API_KEY';\nconst AUTHORIZED_USERS = [0]; // sustituye por los Telegram user IDs autorizados\nconst CONFIRM_TIMEOUT_MS = 60 * 1000;\nconst RISKY_LABELS = {\n  arrancar: 'ARRANCAR el transmisor',\n  parar: 'PARAR el transmisor',\n  reset: 'resetear las alarmas',\n};\nconst RISKY_ENDPOINTS = { arrancar: '/start', parar: '/stop', reset: '/reset' };\n\nconst staticData = $getWorkflowStaticData('global');\nconst update = $input.first().json;\n\nasync function apiCall(path, method = 'GET', body = null) {\n  const res = await fetch(`${API_URL}${path}`, {\n    method,\n    headers: { 'X-API-Key': API_KEY, 'Content-Type': 'application/json' },\n    body: body ? JSON.stringify(body) : undefined,\n  });\n  const data = await res.json().catch(() => ({}));\n  if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);\n  return data;\n}\n\nfunction reply(chatId, messageId, text) {\n  return { json: { action: 'reply', chatId, replyToMessageId: messageId, text } };\n}\n\n// ---------- Callback (botón Confirmar/Cancelar) ----------\nif (update.callback_query) {\n  const cb = update.callback_query;\n  const fromId = cb.from.id;\n  const chatId = cb.message.chat.id;\n  const messageId = cb.message.message_id;\n  const queryId = cb.id;\n\n  const ack = { json: { action: 'callbackAck', queryId } };\n\n  if (!AUTHORIZED_USERS.includes(fromId)) {\n    return [ack, { json: { action: 'editConfirm', chatId, messageId, text: '🔒 No autorizado.' } }];\n  }\n\n  const pending = staticData.pendingConfirm;\n  const [kind, nonce] = String(cb.data || '').split(':');\n\n  if (!pending || pending.nonce !== nonce || Date.now() > pending.expiresAt) {\n    return [ack, { json: { action: 'editConfirm', chatId, messageId, text: '⌛ Confirmación caducada o inválida. Repite el comando.' } }];\n  }\n\n  staticData.pendingConfirm = null;\n\n  if (kind === 'cancel') {\n    return [ack, { json: { action: 'editConfirm', chatId, messageId, text: `❎ ${RISKY_LABELS[pending.action]} — cancelado.` } }];\n  }\n\n  try {\n    const data = await apiCall(RISKY_ENDPOINTS[pending.action], 'POST');\n    return [ack, { json: { action: 'editConfirm', chatId, messageId, text: `✅ ${RISKY_LABELS[pending.action]} — hecho (${data.raw_hex || data.ack_hex || 'ok'}).` } }];\n  } catch (e) {\n    return [ack, { json: { action: 'editConfirm', chatId, messageId, text: `❌ Error al ${RISKY_LABELS[pending.action]}: ${e.message}` } }];\n  }\n}\n\n// ---------- Mensaje de texto ----------\nconst msg = update.message;\nif (!msg || !msg.text) return [];\n\nconst fromId = msg.from.id;\nconst chatId = msg.chat.id;\nconst messageId = msg.message_id;\nconst text = msg.text.trim();\n\nif (!AUTHORIZED_USERS.includes(fromId)) {\n  return [reply(chatId, messageId, '🔒 No autorizado.')];\n}\n\nconst [cmdRaw, ...args] = text.split(/\\s+/);\nconst cmd = cmdRaw.toLowerCase().replace(/^\\//, '').split('@')[0];\n\ntry {\n  switch (cmd) {\n    case 'ayuda':\n    case 'help':\n      return [reply(chatId, messageId,\n        '<b>Comandos disponibles</b>\\n' +\n        '/estado — resumen del amplificador\\n' +\n        '/alarmas — detalle de alarmas\\n' +\n        '/log [n] — últimas n lecturas (por defecto 5)\\n' +\n        '/subir — +50W\\n' +\n        '/bajar — −50W\\n' +\n        '/potencia 40|50|60|70|80|90 — preset de potencia\\n' +\n        '/maxima — potencia máxima\\n' +\n        '/arrancar — Start (pide confirmación)\\n' +\n        '/parar — Stop (pide confirmación)\\n' +\n        '/reset — reset de alarmas (pide confirmación)\\n' +\n        '/conectar host puerto — conectar por red (ser2net)\\n' +\n        '/conectar serial /dev/ttyUSB0 — conectar por puerto serie directo\\n' +\n        '/desconectar — cerrar la conexión'\n      )];\n\n    case 'estado': {\n      const data = await apiCall('/summary');\n      return [reply(chatId, messageId, data.text)];\n    }\n\n    case 'alarmas': {\n      const a = await apiCall('/alarms');\n      const ALARM_LABELS = {\n        rfl_power_alarm: 'RFL Power', fwd_power_alarm: 'FWD Power', exc_power_alarm: 'EXC. Power',\n        temp_combiner_alarm: 'Temp. Combiner', permanent_fail_alarm: 'Permanent Fail',\n        ext_interlock_alarm: 'Ext. Interlock', control_unit_power_alarm: 'Control Unit Power',\n      };\n      const activas = Object.entries(ALARM_LABELS).filter(([k]) => a[k]).map(([, v]) => v);\n      return [reply(chatId, messageId, activas.length ? `🚨 Alarmas activas: ${activas.join(', ')}` : '✅ Sin alarmas activas')];\n    }\n\n    case 'log': {\n      const n = Math.max(1, Math.min(parseInt(args[0], 10) || 5, 50));\n      const data = await apiCall(`/history?limit=${n}`);\n      if (!data.points.length) return [reply(chatId, messageId, 'Sin lecturas en el histórico todavía.')];\n      const lines = data.points.map(p => {\n        const m = p.measurements;\n        return `${p.timestamp} — FWD ${m ? m.fwd_power_w : '—'}W, DC ${m ? m.vdc_volts : '—'}V`;\n      });\n      return [reply(chatId, messageId, `<b>Últimas ${data.points.length} lecturas:</b>\\n` + lines.join('\\n'))];\n    }\n\n    case 'subir': {\n      const data = await apiCall('/power/up', 'POST');\n      return [reply(chatId, messageId, `⬆️ Potencia subida (${data.raw_hex}).`)];\n    }\n\n    case 'bajar': {\n      const data = await apiCall('/power/down', 'POST');\n      return [reply(chatId, messageId, `⬇️ Potencia bajada (${data.raw_hex}).`)];\n    }\n\n    case 'potencia': {\n      const pct = parseInt(args[0], 10);\n      if (![40, 50, 60, 70, 80, 90].includes(pct)) {\n        return [reply(chatId, messageId, 'Uso: /potencia 40|50|60|70|80|90')];\n      }\n      const data = await apiCall('/power/set', 'POST', { percent: pct });\n      return [reply(chatId, messageId, `🎚️ Potencia fijada al ${pct}% (${data.raw_hex}).`)];\n    }\n\n    case 'maxima': {\n      const data = await apiCall('/power/max', 'POST');\n      return [reply(chatId, messageId, `🔺 Potencia máxima fijada (${data.raw_hex}).`)];\n    }\n\n    case 'conectar': {\n      let body;\n      if (args[0] === 'serial') {\n        if (!args[1]) return [reply(chatId, messageId, 'Uso: /conectar serial /dev/ttyUSB0')];\n        body = { device: args[1] };\n      } else {\n        const [host, port] = args;\n        if (!host || !port) return [reply(chatId, messageId, 'Uso: /conectar <ip> <puerto>  ó  /conectar serial <device>')];\n        body = { host, port: parseInt(port, 10) };\n      }\n      const data = await apiCall('/connect', 'POST', body);\n      const target = data.transport === 'serial' ? data.device : `${data.host}:${data.port}`;\n      return [reply(chatId, messageId, `🔌 Conectado — ${target} (${data.transport}).`)];\n    }\n\n    case 'desconectar': {\n      await apiCall('/disconnect', 'POST');\n      return [reply(chatId, messageId, '🔌 Desconectado.')];\n    }\n\n    case 'arrancar':\n    case 'parar':\n    case 'reset': {\n      const nonce = String(Date.now());\n      staticData.pendingConfirm = { action: cmd, nonce, expiresAt: Date.now() + CONFIRM_TIMEOUT_MS };\n      return [{\n        json: {\n          action: 'sendConfirm',\n          chatId,\n          replyToMessageId: messageId,\n          text: `⚠️ ¿Seguro que quieres <b>${RISKY_LABELS[cmd]}</b>? Caduca en ${CONFIRM_TIMEOUT_MS / 1000}s.`,\n          confirmData: `confirm:${nonce}`,\n          cancelData: `cancel:${nonce}`,\n        },\n      }];\n    }\n\n    default:\n      return [reply(chatId, messageId, `Comando no reconocido: ${cmdRaw}. Usa /ayuda.`)];\n  }\n} catch (e) {\n  return [reply(chatId, messageId, `❌ Error: ${e.message}`)];\n}\n"
+      },
+      "id": "267936df-9718-47e0-9e82-bc408a67c817",
+      "name": "Procesar comando",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -880,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "e5f255b2-da1a-4198-b12b-37c19488a8df",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "callbackAck",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": false
+      },
+      "id": "605ce305-72f2-40cc-9ed2-45b87c434158",
+      "name": "¿Es respuesta de callback?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -640,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "4e6921a5-73e3-4d1e-b601-71bed3e45d5b",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "editConfirm",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": false
+      },
+      "id": "60f278b4-a6bf-47f2-9daf-6b7126ab12db",
+      "name": "¿Es edición de confirmación?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -380,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "ba52027b-93f1-41c4-af49-3e24f56c89dd",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "sendConfirm",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": false
+      },
+      "id": "2505ad0a-dffd-41db-9f89-7039ed0e191d",
+      "name": "¿Es petición de confirmación?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -120,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "callback",
+        "queryId": "={{ $json.queryId }}"
+      },
+      "id": "9af2ee6e-da01-412e-9726-886f88970ecd",
+      "name": "Responder callback",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -380,
+        160
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "PON_TU_CREDENCIAL",
+          "name": "SeratelControl-bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "editMessageText",
+        "chatId": "={{ $json.chatId }}",
+        "messageId": "={{ $json.messageId }}",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "e15f852c-3d1a-4351-a863-5f52becd2f9f",
+      "name": "Actualizar confirmación",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -120,
+        320
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "PON_TU_CREDENCIAL",
+          "name": "SeratelControl-bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chatId }}",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "parse_mode": "HTML",
+          "reply_to_message_id": "={{ $json.replyToMessageId }}"
+        },
+        "replyMarkup": "inlineKeyboard",
+        "inlineKeyboard": {
+          "rows": [
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "✅ Confirmar",
+                    "additionalFields": {
+                      "callback_data": "={{ $json.confirmData }}"
+                    }
+                  },
+                  {
+                    "text": "❌ Cancelar",
+                    "additionalFields": {
+                      "callback_data": "={{ $json.cancelData }}"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "id": "1a3197a8-4644-4b86-a109-49b46cc880d7",
+      "name": "Pedir confirmación",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        140,
+        400
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "PON_TU_CREDENCIAL",
+          "name": "SeratelControl-bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chatId }}",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "parse_mode": "HTML",
+          "reply_to_message_id": "={{ $json.replyToMessageId }}"
+        }
+      },
+      "id": "c6ca1361-2546-439d-a8c7-c07b016d0798",
+      "name": "Responder",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        140,
+        500
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "PON_TU_CREDENCIAL",
+          "name": "SeratelControl-bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Cada minuto (dashboard)": {
+      "main": [
+        [
+          {
+            "node": "Leer estado y preparar dashboard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer estado y preparar dashboard": {
+      "main": [
+        [
+          {
+            "node": "¿Es evento de dashboard?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Es evento de dashboard?": {
+      "main": [
+        [
+          {
+            "node": "¿Hay mensaje fijado?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Enviar evento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Hay mensaje fijado?": {
+      "main": [
+        [
+          {
+            "node": "Editar dashboard",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Enviar dashboard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Editar dashboard": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Enviar dashboard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar dashboard": {
+      "main": [
+        [
+          {
+            "node": "Guardar ID de mensaje",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Comandos y botones": {
+      "main": [
+        [
+          {
+            "node": "Procesar comando",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Procesar comando": {
+      "main": [
+        [
+          {
+            "node": "¿Es respuesta de callback?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Es respuesta de callback?": {
+      "main": [
+        [
+          {
+            "node": "Responder callback",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "¿Es edición de confirmación?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Es edición de confirmación?": {
+      "main": [
+        [
+          {
+            "node": "Actualizar confirmación",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "¿Es petición de confirmación?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Es petición de confirmación?": {
+      "main": [
+        [
+          {
+            "node": "Pedir confirmación",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Responder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "id": "05ae009d-7228-4c11-ab56-a0c39262819d"
+}

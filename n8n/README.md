@@ -11,9 +11,11 @@ Hay dos ficheros:
   (mismo patrón que `Meshview_-_..._.template.json` en el otro proyecto).
 
 Si reconstruyes la copia real a partir del template, sustituye:
-`PON_AQUI_TU_API_KEY`, `http://IP_TAILSCALE_RASPBERRY:8000/api`,
-`CHAT_ID = 0` y `AUTHORIZED_USERS = [0]` por tus valores reales, en los
-nodos "Leer estado y preparar dashboard" y "Procesar comando".
+`PON_AQUI_TU_API_KEY`, `http://IP_TAILSCALE_RASPBERRY:8000/api` y
+`AUTHORIZED_USERS = [0]` por tus valores reales, en los nodos "Leer
+estado y preparar dashboard" y "Procesar comando". `CHAT_ID = 0` puedes
+dejarlo tal cual — es solo un fallback hasta que alguien autorizado le
+escriba al bot (ver más abajo).
 
 El workflow (real, importable) conecta con la [API](../API.md) de la
 app y expone un bot de Telegram con:
@@ -24,20 +26,62 @@ app y expone un bot de Telegram con:
   el amplificador se conecta/desconecta, manda un mensaje nuevo aparte.
 - **Comandos** para operar en remoto: `/estado`, `/alarmas`, `/log [n]`,
   `/subir`, `/bajar`, `/potencia <pct>`, `/maxima`, `/conectar`,
-  `/desconectar`, `/arrancar`, `/parar`, `/reset`, `/ayuda`.
+  `/desconectar`, `/arrancar`, `/parar`, `/reset`, `/suscribir`,
+  `/desuscribir`, `/ayuda`.
 - `/arrancar`, `/parar` y `/reset` piden **confirmación con botones**
   (Confirmar/Cancelar) antes de ejecutar — caduca a los 60s.
 - **Whitelist de usuarios de Telegram**: solo los IDs en
   `AUTHORIZED_USERS` (dentro del nodo "Procesar comando") pueden usar
   el bot; cualquier otro recibe "🔒 No autorizado."
+- **Suscripción explícita por chat, con envío a todos los suscritos**:
+  `/suscribir` añade el chat actual a `bot_state.chatIds`;
+  `/desuscribir` lo quita. El dashboard (mensaje fijado, uno por chat)
+  y las alertas se mandan/editan en **todos** los chats de esa lista.
+  Un usuario autorizado puede hablar con el bot (consultar `/estado`,
+  etc.) sin que eso lo suscriba automáticamente — hace falta el comando
+  explícito. La constante `CHAT_ID` del nodo "Preparar dashboard" solo
+  se usa como semilla mientras nadie se ha suscrito todavía (lista
+  vacía).
+- **Fijado nativo de Telegram**: la primera vez que se manda el
+  dashboard a un chat (tras `/suscribir`), además de guardarlo como
+  "mensaje a editar" internamente, se fija de verdad en el chat
+  (`pinChatMessage`) para que quede arriba del todo. `/desuscribir`
+  hace lo inverso: desfija (`unpinChatMessage`) y borra
+  (`deleteMessage`) ese mensaje del chat, además de sacarlo de
+  `chatIds`.
 
 ## Arquitectura (dos triggers, un solo static data global)
 
 Mismo patrón que el workflow de Meshview de nodos: un Schedule Trigger
 para el dashboard/eventos, y un Telegram Trigger para comandos y
-botones, ambos compartiendo `$getWorkflowStaticData('global')`
-(`pinnedMessageId`, `lastAlarms`, `lastConnected`, `pendingConfirm`).
-Se pierde si reimportas el workflow desde cero.
+botones, ambos compartiendo el estado persistido vía `/api/bot-state`
+(`pinnedMessageIds` — uno por chat —, `lastAlarms`, `lastConnected`,
+`pendingConfirm`, `chatIds`). Se pierde si el contenedor de la API se
+reinicia.
+
+En el ciclo del dashboard, "Preparar dashboard" genera un evento por
+cada combinación (acción × chat de `chatIds`). Para el mensaje fijado,
+hay dos nodos después de mandar/editar en Telegram:
+
+- **"Extraer mensaje enviado (por chat)"** — Code en modo **"Run Once
+  for Each Item"**, uno por cada chat. Aquí sí es fiable usar
+  `$('Preparar dashboard').item` para recuperar el chat/messageId de
+  origen de ese envío concreto. También marca `shouldPin` (true solo si
+  no había mensaje fijado antes en ese chat) y, en paralelo — sin
+  bloquear el guardado del estado —, dispara "¿Hay que fijar?" →
+  "Fijar mensaje" (`pinChatMessage`) cuando toca.
+- **"Preparar guardado (dashboard)"** — Code en modo "Run Once for All
+  Items", agrega esos N items en un único `bot_state` (con el
+  `pinnedMessageIds` actualizado de cada chat) antes de la única
+  llamada `PUT /api/bot-state` del ciclo.
+
+Están separados en dos nodos a propósito: agregar y correlacionar por
+chat en el MISMO nodo "Run Once for All Items" (con `itemMatching()`)
+se probó primero y no funcionaba de forma fiable con más de un chat —
+el mensaje fijado se perdía y mandaba uno nuevo en cada ciclo en vez de
+editar el existente. `$('nodo').item` sin índice, en modo "All Items",
+es ambiguo en cuanto hay más de un item; en modo "Each Item" no lo es,
+así que ahí se resuelve el emparejamiento y luego solo se agrega.
 
 ## Puesta en marcha
 
@@ -57,12 +101,15 @@ dashboard" y "Procesar comando" de la copia real del JSON (la que
 rotas la `API_KEY` (`.env` de `supCE_Modernizado`), edítalas ahí a
 mano.
 
-### 3. Averigua tu chat_id
+### 3. Los chat_id se detectan solos
 
-Manda cualquier mensaje al bot (o al grupo donde quieras el dashboard)
-y consulta `https://api.telegram.org/bot<TOKEN>/getUpdates` — el
-`chat.id` de la respuesta es el que necesitas para la constante
-`CHAT_ID` del nodo "Leer estado y preparar dashboard" (ver paso 2).
+No hace falta rellenar `CHAT_ID` a mano: cada usuario autorizado (ver
+paso 4) que le escriba al bot o pulse un botón añade su `chat.id` a
+`bot_state.chatIds`, y el dashboard/las alertas empiezan a mandarse
+también a ese chat automáticamente — a todos los que estén en la
+lista, no solo al último. Solo tendrías que tocar la constante
+`CHAT_ID` del nodo "Preparar dashboard" si quieres forzar un chat de
+arranque antes de que nadie le haya hablado al bot.
 
 ### 4. Averigua tu Telegram user ID
 
@@ -82,10 +129,11 @@ En n8n: *Import from File* → selecciona
 Todos los nodos Telegram del workflow apuntan a una credencial llamada
 `SupCe bot` que no existe todavía en tu instancia — n8n te pedirá
 crearla/asignarla al importar. Crea una credencial tipo **Telegram
-API** con el token de BotFather y asígnala a los 8 nodos Telegram
+API** con el token de BotFather y asígnala a los 11 nodos Telegram
 (Comandos y botones, Editar dashboard, Enviar dashboard, Enviar
 evento, Responder callback, Actualizar confirmación, Pedir
-confirmación, Responder).
+confirmación, Responder, Fijar mensaje, Desfijar mensaje, Borrar
+mensaje).
 
 Los 6 nodos que mandan/editan texto (todos menos "Comandos y botones"
 y "Responder callback") llevan además `appendAttribution: false`, para
@@ -126,3 +174,20 @@ en <1 minuto, y el Telegram Trigger registra el webhook automáticamente.
   aviso ya conocido de `/api/connect` en modo `serial` — sigue siendo
   responsabilidad de quien opera no usar ser2net (SupCE) y el modo
   serie a la vez. Ver [API.md](../API.md).
+- **`pinnedMessageIds` se fusiona, no se reemplaza**: en "Preparar
+  guardado (dashboard)" se parte del `pinnedMessageIds` anterior y solo
+  se sobrescriben las entradas de los chats que tuvieron éxito ese
+  ciclo. Si no fuera así, un fallo puntual al mandar/editar en un chat
+  (Telegram caído un segundo, red, lo que sea) borraría su entrada para
+  siempre y el bot le mandaría un mensaje nuevo en cada ciclo a partir
+  de ahí, sin recuperarse solo. "Enviar dashboard" lleva además
+  `onError: continueRegularOutput` para que un fallo en un chat no
+  arrastre a los demás del mismo ciclo.
+- **Si `bot_state` se corrompió con datos antiguos** (versiones previas
+  a este workflow guardaban el envío entero de Telegram en vez de solo
+  `nextBotState`, dejando un `nextBotState` anidado dentro de sí mismo
+  cada vez más grande — inofensivo para el funcionamiento actual, pero
+  cada vez más pesado): resetéalo a mano una vez con
+  `curl -X PUT -H "X-API-Key: TU_API_KEY" -H "Content-Type: application/json" -d '{}' http://IP_TAILSCALE_RASPBERRY:8000/api/bot-state`.
+  Se pierde el mensaje fijado (mandará uno nuevo el próximo ciclo) pero
+  arranca limpio, sin la basura acumulada.

@@ -74,7 +74,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// CONFIG\nconst CHAT_ID = 0; // sustituye por tu chat_id de Telegram\n\nfunction fmtNum(n, d = 0) {\n  return (n === null || n === undefined) ? '—' : Number(n).toFixed(d);\n}\n\nconst ALARM_LABELS = {\n  rfl_power_alarm: 'RFL Power',\n  fwd_power_alarm: 'FWD Power',\n  exc_power_alarm: 'EXC. Power',\n  temp_combiner_alarm: 'Temp. Combiner',\n  permanent_fail_alarm: 'Permanent Fail',\n  ext_interlock_alarm: 'Ext. Interlock',\n  control_unit_power_alarm: 'Control Unit Power',\n};\n\nconst botState = $('GET bot-state (dashboard)').item.json;\nconst input = $input.first().json;\n\nif (input.connected === undefined) {\n  const raw = input.error !== undefined\n    ? (typeof input.error === 'string' ? input.error : (input.error && input.error.message) || JSON.stringify(input.error))\n    : 'error desconocido';\n  return [{\n    json: {\n      action: 'dashboard',\n      chatId: CHAT_ID,\n      hasPinned: !!botState.pinnedMessageId,\n      messageId: botState.pinnedMessageId || null,\n      nextBotState: { ...botState },\n      text: `⚠️ <b>Amplificador FM</b>\\nNo se pudo consultar la API: ${raw}`,\n    },\n  }];\n}\n\nconst status = input;\nconst events = [];\nconst wasConnected = botState.lastConnected === true;\nconst nowConnected = !!status.connected;\n\nconst lines = [];\nlines.push('📻 <b>Amplificador FM — esRadio Albacete</b>');\nif (nowConnected) {\n  const target = status.transport === 'serial' ? status.device : `${status.host}:${status.port}`;\n  lines.push(`🟢 Conectado (${status.transport}) — <code>${target}</code>`);\n} else {\n  lines.push(`⚪ Desconectado${status.last_error ? ` — ${status.last_error}` : ''}`);\n}\n\nconst m = status.measurements;\nconst a = status.alarms;\n\nif (m) {\n  lines.push('');\n  lines.push(`⚡ FWD: <b>${fmtNum(m.fwd_power_w)} W</b> · DC: ${fmtNum(m.vdc_volts, 1)} V`);\n  const amps = m.idc_amps.map((c, i) => `A${i + 1}:${c}${m.current_alarms && m.current_alarms[i] ? '⚠️' : ''}`).join('  ');\n  lines.push(`🔋 ${amps}`);\n}\n\nif (a) {\n  const activas = Object.entries(ALARM_LABELS).filter(([k]) => a[k]).map(([, v]) => v);\n  lines.push('');\n  lines.push(activas.length ? `🚨 <b>Alarmas:</b> ${activas.join(', ')}` : '✅ Sin alarmas activas');\n}\n\nlines.push('');\nlines.push(`<i>Actualizado: ${new Date().toLocaleString('es-ES', { timeZone: 'Europe/Madrid' })}</i>`);\n\n// Estado que hay que persistir tras este ciclo (pinnedMessageId se\n// completa más adelante, tras mandar/editar el mensaje de Telegram).\nconst nextBotState = { ...botState, lastAlarms: a || botState.lastAlarms || null, lastConnected: nowConnected };\n\nevents.push({\n  json: {\n    action: 'dashboard',\n    chatId: CHAT_ID,\n    hasPinned: !!botState.pinnedMessageId,\n    messageId: botState.pinnedMessageId || null,\n    nextBotState,\n    text: lines.join('\\n'),\n  },\n});\n\nif (a) {\n  const prevAlarms = botState.lastAlarms || {};\n  for (const [key, label] of Object.entries(ALARM_LABELS)) {\n    const now = !!a[key];\n    const before = !!prevAlarms[key];\n    if (now && !before) {\n      events.push({ json: { action: 'alerta', chatId: CHAT_ID, text: `🚨 <b>Alarma activada:</b> ${label}` } });\n    } else if (!now && before) {\n      events.push({ json: { action: 'alerta', chatId: CHAT_ID, text: `✅ <b>Alarma resuelta:</b> ${label}` } });\n    }\n  }\n}\n\nif (nowConnected && !wasConnected) {\n  events.push({ json: { action: 'alerta', chatId: CHAT_ID, text: `🟢 <b>Conectado</b> al amplificador (${status.transport})` } });\n} else if (!nowConnected && wasConnected) {\n  events.push({ json: { action: 'alerta', chatId: CHAT_ID, text: `⚪ <b>Desconectado</b> del amplificador${status.last_error ? ` — ${status.last_error}` : ''}` } });\n}\n\nreturn events;\n"
+        "jsCode": "// CONFIG\nconst CHAT_ID = 0; // fallback SOLO hasta que algún usuario autorizado le escriba al bot (entonces su chat entra en bot_state.chatIds y se usa esa lista)\n\nfunction fmtNum(n, d = 0) {\n  return (n === null || n === undefined) ? '—' : Number(n).toFixed(d);\n}\n\nconst ALARM_LABELS = {\n  rfl_power_alarm: 'RFL Power',\n  fwd_power_alarm: 'FWD Power',\n  exc_power_alarm: 'EXC. Power',\n  temp_combiner_alarm: 'Temp. Combiner',\n  permanent_fail_alarm: 'Permanent Fail',\n  ext_interlock_alarm: 'Ext. Interlock',\n  control_unit_power_alarm: 'Control Unit Power',\n};\n\nconst botState = $('GET bot-state (dashboard)').item.json;\n// Se manda/edita el dashboard y las alertas en TODOS los chats conocidos\n// (uno por cada usuario autorizado que le haya escrito alguna vez al bot).\nconst chatIds = (Array.isArray(botState.chatIds) && botState.chatIds.length)\n  ? botState.chatIds\n  : (CHAT_ID ? [CHAT_ID] : []);\nconst pinnedMessageIds = botState.pinnedMessageIds || {};\nconst input = $input.first().json;\n\nif (input.connected === undefined) {\n  const raw = input.error !== undefined\n    ? (typeof input.error === 'string' ? input.error : (input.error && input.error.message) || JSON.stringify(input.error))\n    : 'error desconocido';\n  const text = `⚠️ <b>Amplificador FM</b>\\nNo se pudo consultar la API: ${raw}`;\n  return chatIds.map((chatId) => ({\n    json: {\n      action: 'dashboard',\n      chatId,\n      hasPinned: !!pinnedMessageIds[chatId],\n      messageId: pinnedMessageIds[chatId] || null,\n      nextBotState: { ...botState },\n      text,\n    },\n  }));\n}\n\nconst status = input;\nconst events = [];\nconst wasConnected = botState.lastConnected === true;\nconst nowConnected = !!status.connected;\n\nconst lines = [];\nlines.push('📻 <b>Amplificador FM — esRadio Albacete</b>');\nif (nowConnected) {\n  const target = status.transport === 'serial' ? status.device : `${status.host}:${status.port}`;\n  lines.push(`🟢 Conectado (${status.transport}) — <code>${target}</code>`);\n} else {\n  lines.push(`⚪ Desconectado${status.last_error ? ` — ${status.last_error}` : ''}`);\n}\n\nconst m = status.measurements;\nconst a = status.alarms;\n\nif (m) {\n  lines.push('');\n  lines.push(`⚡ FWD: <b>${fmtNum(m.fwd_power_w)} W</b> · DC: ${fmtNum(m.vdc_volts, 1)} V`);\n  const amps = m.idc_amps.map((c, i) => `A${i + 1}:${c}${m.current_alarms && m.current_alarms[i] ? '⚠️' : ''}`).join('  ');\n  lines.push(`🔋 ${amps}`);\n}\n\nif (a) {\n  const activas = Object.entries(ALARM_LABELS).filter(([k]) => a[k]).map(([, v]) => v);\n  lines.push('');\n  lines.push(activas.length ? `🚨 <b>Alarmas:</b> ${activas.join(', ')}` : '✅ Sin alarmas activas');\n}\n\nlines.push('');\nlines.push(`<i>Actualizado: ${new Date().toLocaleString('es-ES', { timeZone: 'Europe/Madrid' })}</i>`);\n\n// Estado que hay que persistir tras este ciclo (pinnedMessageIds se\n// completa más adelante, tras mandar/editar el mensaje de Telegram en\n// cada chat).\nconst nextBotState = { ...botState, lastAlarms: a || botState.lastAlarms || null, lastConnected: nowConnected };\nconst dashboardText = lines.join('\\n');\n\nfor (const chatId of chatIds) {\n  events.push({\n    json: {\n      action: 'dashboard',\n      chatId,\n      hasPinned: !!pinnedMessageIds[chatId],\n      messageId: pinnedMessageIds[chatId] || null,\n      nextBotState,\n      text: dashboardText,\n    },\n  });\n}\n\nfunction pushAlertToAllChats(text) {\n  for (const chatId of chatIds) {\n    events.push({ json: { action: 'alerta', chatId, text } });\n  }\n}\n\nif (a) {\n  const prevAlarms = botState.lastAlarms || {};\n  for (const [key, label] of Object.entries(ALARM_LABELS)) {\n    const now = !!a[key];\n    const before = !!prevAlarms[key];\n    if (now && !before) {\n      pushAlertToAllChats(`🚨 <b>Alarma activada:</b> ${label}`);\n    } else if (!now && before) {\n      pushAlertToAllChats(`✅ <b>Alarma resuelta:</b> ${label}`);\n    }\n  }\n}\n\nif (nowConnected && !wasConnected) {\n  pushAlertToAllChats(`🟢 <b>Conectado</b> al amplificador (${status.transport})`);\n} else if (!nowConnected && wasConnected) {\n  pushAlertToAllChats(`⚪ <b>Desconectado</b> del amplificador${status.last_error ? ` — ${status.last_error}` : ''}`);\n}\n\nreturn events;"
       },
       "id": "0a9264cd-cf00-490f-885e-ee0ab3bd39a3",
       "name": "Preparar dashboard",
@@ -448,19 +448,20 @@
           "id": "PON_TU_CREDENCIAL",
           "name": "SupCe bot"
         }
-      }
+      },
+      "onError": "continueRegularOutput"
     },
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// Se ejecuta tras mandar/editar el mensaje del dashboard en Telegram.\n// La respuesta del nodo Telegram viene envuelta como { ok, result: {...} }\n// (formato crudo de la Bot API de Telegram en esta instancia de n8n).\nconst prepared = $('Preparar dashboard').item.json;\nconst out = $input.first().json;\nconst sentMessageId = (out.result && out.result.message_id) || out.message_id;\nreturn [{\n  json: {\n    ...prepared.nextBotState,\n    pinnedMessageId: sentMessageId || prepared.messageId || null,\n  },\n}];\n"
+        "jsCode": "// Se ejecuta tras \"Extraer mensaje enviado (por chat)\": un item por\n// chat que haya tenido éxito este ciclo, cada uno ya con {chatId,\n// messageId, nextBotState} resuelto de forma fiable ahí (ver ese\n// nodo). Aquí se FUSIONAN sobre el pinnedMessageIds anterior (no se\n// reemplaza entero): si el envío/edición falla para un chat en este\n// ciclo (ese item nunca llega aquí), su entrada anterior se conserva\n// en vez de perderse — si no, ese chat quedaba con hasPinned=false\n// para siempre y el bot le mandaba un mensaje nuevo en cada ciclo.\nconst items = $input.all();\nif (items.length === 0) return [];\n\nlet nextBotState = null;\n\nfor (const { json } of items) {\n  if (nextBotState === null) nextBotState = json.nextBotState;\n}\n\nconst pinnedMessageIds = { ...(nextBotState.pinnedMessageIds || {}) };\nfor (const { json } of items) {\n  pinnedMessageIds[String(json.chatId)] = json.messageId;\n}\n\nreturn [{\n  json: {\n    ...nextBotState,\n    pinnedMessageIds,\n  },\n}];"
       },
       "id": "d4674b0a-8258-4715-b010-8b5044b7da98",
       "name": "Preparar guardado (dashboard)",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        100,
+        340,
         -280
       ]
     },
@@ -487,7 +488,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        340,
+        580,
         -280
       ]
     },
@@ -566,7 +567,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "// CONFIG\nconst AUTHORIZED_USERS = [0]; // sustituye por los Telegram user IDs autorizados\nconst CONFIRM_TIMEOUT_MS = 60 * 1000;\nconst RISKY_LABELS = {\n  arrancar: 'ARRANCAR el transmisor',\n  parar: 'PARAR el transmisor',\n  reset: 'resetear las alarmas',\n};\nconst RISKY_ENDPOINTS = { arrancar: '/start', parar: '/stop', reset: '/reset' };\n\n// Botones del dashboard (callback_data \"menu:<clave>\") -> comando + argumentos.\nconst MENU_ACTIONS = {\n  subir: ['subir', []],\n  bajar: ['bajar', []],\n  maxima: ['maxima', []],\n  pot40: ['potencia', ['40']],\n  pot50: ['potencia', ['50']],\n  pot60: ['potencia', ['60']],\n  pot70: ['potencia', ['70']],\n  pot80: ['potencia', ['80']],\n  pot90: ['potencia', ['90']],\n  estado: ['estado', []],\n  alarmas: ['alarmas', []],\n  log: ['log', []],\n  arrancar: ['arrancar', []],\n  parar: ['parar', []],\n  reset: ['reset', []],\n};\n\n// \"GET bot-state (cmd)\" es el predecesor DIRECTO de este nodo, así que\n// su salida es $input aquí. El update de Telegram hay que referenciarlo\n// por nombre porque quedó un salto más atrás en la cadena.\nconst botState = $input.first().json;\n\n// El resultado de un comando/botón es SIEMPRE un mensaje nuevo (una\n// edición de un mensaje antiguo no hace scroll ni avisa en Telegram,\n// así que pasaba desapercibida). nextBotState viaja con el item para\n// que el paso que guarda pendingConfirm no pise nada.\nfunction reply(chatId, messageId, text, nextBotState) {\n  return {\n    json: {\n      action: 'reply',\n      chatId,\n      replyToMessageId: messageId,\n      text,\n      nextBotState: nextBotState || botState,\n    },\n  };\n}\n\nfunction apiCall(httpMethod, httpPath, httpBody, replyKind, ctx, nextBotState) {\n  return { json: { action: 'apiCall', httpMethod, httpPath, httpBody: httpBody || null, replyKind, nextBotState: nextBotState || botState, ...ctx } };\n}\n\n// Despacho compartido entre comandos escritos (/subir) y botones del dashboard.\nfunction dispatchCommand(cmd, args, chatId, replyToMessageId, nextBotState) {\n  const ctx = { chatId, replyToMessageId };\n  switch (cmd) {\n    case 'ayuda':\n    case 'help':\n      return [reply(chatId, replyToMessageId,\n        '<b>Comandos disponibles</b>\\n' +\n        '/estado — resumen del amplificador\\n' +\n        '/alarmas — detalle de alarmas\\n' +\n        '/log [n] — últimas n lecturas (por defecto 5)\\n' +\n        '/subir — +50W\\n' +\n        '/bajar — −50W\\n' +\n        '/potencia 40|50|60|70|80|90 — preset de potencia\\n' +\n        '/maxima — potencia máxima\\n' +\n        '/arrancar — Start (pide confirmación)\\n' +\n        '/parar — Stop (pide confirmación)\\n' +\n        '/reset — reset de alarmas (pide confirmación)\\n' +\n        '/conectar host puerto — conectar por red (ser2net)\\n' +\n        '/conectar serial /dev/ttyUSB0 — conectar por puerto serie directo\\n' +\n        '/desconectar — cerrar la conexión\\n\\n' +\n        'También puedes usar los botones debajo del dashboard.',\n        nextBotState\n      )];\n\n    case 'estado':\n      return [apiCall('GET', '/summary', null, 'estado', ctx, nextBotState)];\n\n    case 'alarmas':\n      return [apiCall('GET', '/alarms', null, 'alarmas', ctx, nextBotState)];\n\n    case 'log': {\n      const n = Math.max(1, Math.min(parseInt(args[0], 10) || 5, 50));\n      return [apiCall('GET', `/history?limit=${n}`, null, 'log', ctx, nextBotState)];\n    }\n\n    case 'subir':\n      return [apiCall('POST', '/power/up', null, 'subir', ctx, nextBotState)];\n\n    case 'bajar':\n      return [apiCall('POST', '/power/down', null, 'bajar', ctx, nextBotState)];\n\n    case 'potencia': {\n      const pct = parseInt(args[0], 10);\n      if (![40, 50, 60, 70, 80, 90].includes(pct)) {\n        return [reply(chatId, replyToMessageId, 'Uso: /potencia 40|50|60|70|80|90', nextBotState)];\n      }\n      return [apiCall('POST', '/power/set', { percent: pct }, 'potencia', { ...ctx, pct }, nextBotState)];\n    }\n\n    case 'maxima':\n      return [apiCall('POST', '/power/max', null, 'maxima', ctx, nextBotState)];\n\n    case 'conectar': {\n      let body;\n      if (args[0] === 'serial') {\n        if (!args[1]) return [reply(chatId, replyToMessageId, 'Uso: /conectar serial [device]', nextBotState)];\n        body = { device: args[1] };\n      } else {\n        const [host, port] = args;\n        if (!host || !port) return [reply(chatId, replyToMessageId, 'Uso: /conectar [ip] [puerto]  ó  /conectar serial [device]', nextBotState)];\n        body = { host, port: parseInt(port, 10) };\n      }\n      return [apiCall('POST', '/connect', body, 'conectar', ctx, nextBotState)];\n    }\n\n    case 'desconectar':\n      return [apiCall('POST', '/disconnect', null, 'desconectar', ctx, nextBotState)];\n\n    case 'arrancar':\n    case 'parar':\n    case 'reset': {\n      const nonce = String(Date.now());\n      const withPending = { ...(nextBotState || botState), pendingConfirm: { action: cmd, nonce, expiresAt: Date.now() + CONFIRM_TIMEOUT_MS } };\n      return [{\n        json: {\n          action: 'sendConfirm',\n          chatId,\n          replyToMessageId,\n          text: `⚠️ ¿Seguro que quieres <b>${RISKY_LABELS[cmd]}</b>? Caduca en ${CONFIRM_TIMEOUT_MS / 1000}s.`,\n          confirmData: `confirm:${nonce}`,\n          cancelData: `cancel:${nonce}`,\n          nextBotState: withPending,\n        },\n      }];\n    }\n\n    default:\n      return [reply(chatId, replyToMessageId, `Comando no reconocido: /${cmd}. Usa /ayuda.`, nextBotState)];\n  }\n}\n\nconst update = $('Comandos y botones').item.json;\n\n// ---------- Callback (botones: confirmar/cancelar, o menú del dashboard) ----------\nif (update.callback_query) {\n  const cb = update.callback_query;\n  const fromId = cb.from.id;\n  const chatId = cb.message.chat.id;\n  const messageId = cb.message.message_id;\n  const queryId = cb.id;\n  const data = String(cb.data || '');\n\n  const ack = { json: { action: 'callbackAck', queryId } };\n\n  if (!AUTHORIZED_USERS.includes(fromId)) {\n    return [ack, { json: { action: 'editConfirm', chatId, messageId, text: '🔒 No autorizado.', nextBotState: botState } }];\n  }\n\n  // Botones del dashboard: misma lógica que un comando escrito, respondiendo\n  // como mensaje nuevo (no se toca el propio mensaje del dashboard).\n  if (data.startsWith('menu:')) {\n    const mapped = MENU_ACTIONS[data.slice('menu:'.length)];\n    if (!mapped) return [ack];\n    const [cmd, args] = mapped;\n    return [ack, ...dispatchCommand(cmd, args, chatId, messageId, botState)];\n  }\n\n  // Confirmar/Cancelar de una acción de riesgo pendiente\n  const pending = botState.pendingConfirm;\n  const [kind, nonce] = data.split(':');\n\n  if (!pending || pending.nonce !== nonce || Date.now() > pending.expiresAt) {\n    return [ack, { json: { action: 'editConfirm', chatId, messageId, text: '⌛ Confirmación caducada o inválida. Repite el comando.', nextBotState: botState } }];\n  }\n\n  const clearedState = { ...botState, pendingConfirm: null };\n\n  if (kind === 'cancel') {\n    return [ack, { json: { action: 'editConfirm', chatId, messageId, text: `❎ ${RISKY_LABELS[pending.action]} — cancelado.`, nextBotState: clearedState } }];\n  }\n\n  return [ack, apiCall('POST', RISKY_ENDPOINTS[pending.action], null, 'confirmExec', {\n    chatId, messageId, pendingActionLabel: RISKY_LABELS[pending.action],\n  }, clearedState)];\n}\n\n// ---------- Mensaje de texto ----------\nconst msg = update.message;\nif (!msg || !msg.text) return [];\n\nconst fromId = msg.from.id;\nconst chatId = msg.chat.id;\nconst messageId = msg.message_id;\nconst text = msg.text.trim();\n\nif (!AUTHORIZED_USERS.includes(fromId)) {\n  return [reply(chatId, messageId, '🔒 No autorizado.', botState)];\n}\n\nconst [cmdRaw, ...args] = text.split(/\\s+/);\nconst cmd = cmdRaw.toLowerCase().replace(/^\\//, '').split('@')[0];\n\nreturn dispatchCommand(cmd, args, chatId, messageId, botState);\n"
+        "jsCode": "// CONFIG\nconst AUTHORIZED_USERS = [0]; // sustituye por los Telegram user IDs autorizados\nconst CONFIRM_TIMEOUT_MS = 60 * 1000;\nconst RISKY_LABELS = {\n  arrancar: 'ARRANCAR el transmisor',\n  parar: 'PARAR el transmisor',\n  reset: 'resetear las alarmas',\n};\nconst RISKY_ENDPOINTS = { arrancar: '/start', parar: '/stop', reset: '/reset' };\n\n// Botones del dashboard (callback_data \"menu:<clave>\") -> comando + argumentos.\nconst MENU_ACTIONS = {\n  subir: ['subir', []],\n  bajar: ['bajar', []],\n  maxima: ['maxima', []],\n  pot40: ['potencia', ['40']],\n  pot50: ['potencia', ['50']],\n  pot60: ['potencia', ['60']],\n  pot70: ['potencia', ['70']],\n  pot80: ['potencia', ['80']],\n  pot90: ['potencia', ['90']],\n  estado: ['estado', []],\n  alarmas: ['alarmas', []],\n  log: ['log', []],\n  arrancar: ['arrancar', []],\n  parar: ['parar', []],\n  reset: ['reset', []],\n};\n\n// \"GET bot-state (cmd)\" es el predecesor DIRECTO de este nodo, así que\n// su salida es $input aquí. El update de Telegram hay que referenciarlo\n// por nombre porque quedó un salto más atrás en la cadena.\nfunction addChat(state, chatId) {\n  const chatIds = Array.isArray(state.chatIds) ? state.chatIds : [];\n  if (chatIds.includes(chatId)) return state;\n  return { ...state, chatIds: [...chatIds, chatId] };\n}\n\nfunction removeChat(state, chatId) {\n  const chatIds = Array.isArray(state.chatIds) ? state.chatIds : [];\n  return { ...state, chatIds: chatIds.filter((id) => id !== chatId) };\n}\n\nlet botState = $input.first().json;\n\n// El resultado de un comando/botón es SIEMPRE un mensaje nuevo (una\n// edición de un mensaje antiguo no hace scroll ni avisa en Telegram,\n// así que pasaba desapercibida). nextBotState viaja con el item para\n// que el paso que guarda pendingConfirm no pise nada.\nfunction reply(chatId, messageId, text, nextBotState) {\n  return {\n    json: {\n      action: 'reply',\n      chatId,\n      replyToMessageId: messageId,\n      text,\n      nextBotState: nextBotState || botState,\n    },\n  };\n}\n\nfunction apiCall(httpMethod, httpPath, httpBody, replyKind, ctx, nextBotState) {\n  return { json: { action: 'apiCall', httpMethod, httpPath, httpBody: httpBody || null, replyKind, nextBotState: nextBotState || botState, ...ctx } };\n}\n\n// Despacho compartido entre comandos escritos (/subir) y botones del dashboard.\nfunction dispatchCommand(cmd, args, chatId, replyToMessageId, nextBotState) {\n  const ctx = { chatId, replyToMessageId };\n  switch (cmd) {\n    case 'start':\n    case 'ayuda':\n    case 'help':\n      return [reply(chatId, replyToMessageId,\n        '<b>Comandos disponibles</b>\\n' +\n        '/estado — resumen del amplificador\\n' +\n        '/alarmas — detalle de alarmas\\n' +\n        '/log [n] — últimas n lecturas (por defecto 5)\\n' +\n        '/subir — +50W\\n' +\n        '/bajar — −50W\\n' +\n        '/potencia 40|50|60|70|80|90 — preset de potencia\\n' +\n        '/maxima — potencia máxima\\n' +\n        '/arrancar — Start (pide confirmación)\\n' +\n        '/parar — Stop (pide confirmación)\\n' +\n        '/reset — reset de alarmas (pide confirmación)\\n' +\n        '/conectar host puerto — conectar por red (ser2net)\\n' +\n        '/conectar serial /dev/ttyUSB0 — conectar por puerto serie directo\\n' +\n        '/suscribir — recibe el dashboard fijado y las alarmas en este chat\\n' +\n        '/desuscribir — deja de recibirlos en este chat\\n' +\n        '/desconectar — cerrar la conexión\\n\\n' +\n        'También puedes usar los botones debajo del dashboard.',\n        nextBotState\n      )];\n\n    case 'estado':\n      return [apiCall('GET', '/summary', null, 'estado', ctx, nextBotState)];\n\n    case 'alarmas':\n      return [apiCall('GET', '/alarms', null, 'alarmas', ctx, nextBotState)];\n\n    case 'log': {\n      const n = Math.max(1, Math.min(parseInt(args[0], 10) || 5, 50));\n      return [apiCall('GET', `/history?limit=${n}`, null, 'log', ctx, nextBotState)];\n    }\n\n    case 'subir':\n      return [apiCall('POST', '/power/up', null, 'subir', ctx, nextBotState)];\n\n    case 'bajar':\n      return [apiCall('POST', '/power/down', null, 'bajar', ctx, nextBotState)];\n\n    case 'potencia': {\n      const pct = parseInt(args[0], 10);\n      if (![40, 50, 60, 70, 80, 90].includes(pct)) {\n        return [reply(chatId, replyToMessageId, 'Uso: /potencia 40|50|60|70|80|90', nextBotState)];\n      }\n      return [apiCall('POST', '/power/set', { percent: pct }, 'potencia', { ...ctx, pct }, nextBotState)];\n    }\n\n    case 'maxima':\n      return [apiCall('POST', '/power/max', null, 'maxima', ctx, nextBotState)];\n\n    case 'conectar': {\n      let body;\n      if (args[0] === 'serial') {\n        if (!args[1]) return [reply(chatId, replyToMessageId, 'Uso: /conectar serial [device]', nextBotState)];\n        body = { device: args[1] };\n      } else {\n        const [host, port] = args;\n        if (!host || !port) return [reply(chatId, replyToMessageId, 'Uso: /conectar [ip] [puerto]  ó  /conectar serial [device]', nextBotState)];\n        body = { host, port: parseInt(port, 10) };\n      }\n      return [apiCall('POST', '/connect', body, 'conectar', ctx, nextBotState)];\n    }\n\n    case 'desconectar':\n      return [apiCall('POST', '/disconnect', null, 'desconectar', ctx, nextBotState)];\n\n    case 'arrancar':\n    case 'parar':\n    case 'reset': {\n      const nonce = String(Date.now());\n      const withPending = { ...(nextBotState || botState), pendingConfirm: { action: cmd, nonce, expiresAt: Date.now() + CONFIRM_TIMEOUT_MS } };\n      return [{\n        json: {\n          action: 'sendConfirm',\n          chatId,\n          replyToMessageId,\n          text: `⚠️ ¿Seguro que quieres <b>${RISKY_LABELS[cmd]}</b>? Caduca en ${CONFIRM_TIMEOUT_MS / 1000}s.`,\n          confirmData: `confirm:${nonce}`,\n          cancelData: `cancel:${nonce}`,\n          nextBotState: withPending,\n        },\n      }];\n    }\n\n    case 'suscribir': {\n      const state = nextBotState || botState;\n      const already = Array.isArray(state.chatIds) && state.chatIds.includes(chatId);\n      return [reply(chatId, replyToMessageId,\n        already\n          ? 'Este chat ya está suscrito al dashboard y las alarmas.'\n          : '✅ Suscrito. En el próximo minuto verás aquí el dashboard, fijado.',\n        addChat(state, chatId)\n      )];\n    }\n\n    // A diferencia de los demás comandos, esto no es un simple\n    // 'reply': hay que desfijar y borrar el mensaje del dashboard en\n    // Telegram (acción 'unsubscribe', gestionada más abajo en el\n    // workflow por \"¿Es baja de suscripción?\") además de actualizar\n    // el estado.\n    case 'desuscribir': {\n      const state = nextBotState || botState;\n      const chatIds = Array.isArray(state.chatIds) ? state.chatIds : [];\n      const wasSubscribed = chatIds.includes(chatId);\n\n      if (!wasSubscribed) {\n        return [reply(chatId, replyToMessageId, 'Este chat no estaba suscrito.', state)];\n      }\n\n      const pinnedMessageIds = { ...(state.pinnedMessageIds || {}) };\n      const unpinMessageId = pinnedMessageIds[String(chatId)] || null;\n      delete pinnedMessageIds[String(chatId)];\n      const updated = removeChat({ ...state, pinnedMessageIds }, chatId);\n\n      return [{\n        json: {\n          action: 'unsubscribe',\n          chatId,\n          replyToMessageId,\n          unpinMessageId,\n          text: '❎ Desuscrito. Este chat ya no recibirá el dashboard ni las alarmas.',\n          nextBotState: updated,\n        },\n      }];\n    }\n\n    default:\n      return [reply(chatId, replyToMessageId, `Comando no reconocido: /${cmd}. Usa /ayuda.`, nextBotState)];\n  }\n}\n\nconst update = $('Comandos y botones').item.json;\n\n// ---------- Callback (botones: confirmar/cancelar, o menú del dashboard) ----------\nif (update.callback_query) {\n  const cb = update.callback_query;\n  const fromId = cb.from.id;\n  const chatId = cb.message.chat.id;\n  const messageId = cb.message.message_id;\n  const queryId = cb.id;\n  const data = String(cb.data || '');\n\n  const ack = { json: { action: 'callbackAck', queryId } };\n\n  if (!AUTHORIZED_USERS.includes(fromId)) {\n    return [ack, { json: { action: 'editConfirm', chatId, messageId, text: '🔒 No autorizado.', nextBotState: botState } }];\n  }\n\n  // Botones del dashboard: misma lógica que un comando escrito, respondiendo\n  // como mensaje nuevo (no se toca el propio mensaje del dashboard).\n  if (data.startsWith('menu:')) {\n    const mapped = MENU_ACTIONS[data.slice('menu:'.length)];\n    if (!mapped) return [ack];\n    const [cmd, args] = mapped;\n    return [ack, ...dispatchCommand(cmd, args, chatId, messageId, botState)];\n  }\n\n  // Confirmar/Cancelar de una acción de riesgo pendiente\n  const pending = botState.pendingConfirm;\n  const [kind, nonce] = data.split(':');\n\n  if (!pending || pending.nonce !== nonce || Date.now() > pending.expiresAt) {\n    return [ack, { json: { action: 'editConfirm', chatId, messageId, text: '⌛ Confirmación caducada o inválida. Repite el comando.', nextBotState: botState } }];\n  }\n\n  const clearedState = { ...botState, pendingConfirm: null };\n\n  if (kind === 'cancel') {\n    return [ack, { json: { action: 'editConfirm', chatId, messageId, text: `❎ ${RISKY_LABELS[pending.action]} — cancelado.`, nextBotState: clearedState } }];\n  }\n\n  return [ack, apiCall('POST', RISKY_ENDPOINTS[pending.action], null, 'confirmExec', {\n    chatId, messageId, pendingActionLabel: RISKY_LABELS[pending.action],\n  }, clearedState)];\n}\n\n// ---------- Mensaje de texto ----------\nconst msg = update.message;\nif (!msg || !msg.text) return [];\n\nconst fromId = msg.from.id;\nconst chatId = msg.chat.id;\nconst messageId = msg.message_id;\nconst text = msg.text.trim();\n\nif (!AUTHORIZED_USERS.includes(fromId)) {\n  return [reply(chatId, messageId, '🔒 No autorizado.', botState)];\n}\n\nconst [cmdRaw, ...args] = text.split(/\\s+/);\nconst cmd = cmdRaw.toLowerCase().replace(/^\\//, '').split('@')[0];\n\nreturn dispatchCommand(cmd, args, chatId, messageId, botState);\n"
       },
       "id": "65cad814-24aa-4617-bb63-f655befe74f6",
       "name": "Procesar comando",
@@ -938,6 +939,152 @@
         800,
         640
       ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Se ejecuta UNA VEZ POR ITEM (uno por chat), justo tras editar o\n// enviar el mensaje del dashboard en ese chat. A diferencia de\n// \"Preparar guardado (dashboard)\" (que corre en modo \"Run Once for\n// All Items\", donde $('nodo').item sin índice es ambiguo con varios\n// chats a la vez), aquí SÍ es fiable: en modo \"Run Once for Each\n// Item\" cada item mantiene su propio enlace 1:1 con el item que lo\n// originó en \"Preparar dashboard\".\nconst prepared = $('Preparar dashboard').item.json;\nconst out = $json;\nconst sentMessageId = (out.result && out.result.message_id) || out.message_id;\nreturn {\n  json: {\n    chatId: prepared.chatId,\n    nextBotState: prepared.nextBotState,\n    messageId: sentMessageId || prepared.messageId || null,\n    // Solo hay que fijar (pin nativo de Telegram) la PRIMERA vez que se\n    // manda el dashboard a un chat (no había mensaje fijado todavía);\n    // las ediciones posteriores mantienen el mismo mensaje ya fijado.\n    shouldPin: !prepared.hasPinned,\n  },\n};"
+      },
+      "id": "6c18b5d3-643e-4cd5-aa06-6efbc40883c7",
+      "name": "Extraer mensaje enviado (por chat)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        100,
+        -280
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "df9eeead-1ac9-493e-a7f1-e263c50e0fe0",
+              "leftValue": "={{ $json.shouldPin }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": false
+      },
+      "id": "fac19bee-a1f2-46e8-84dc-2c6c8d73e634",
+      "name": "¿Hay que fijar?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        100,
+        -140
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "operation": "pinChatMessage",
+        "chatId": "={{ $json.chatId }}",
+        "messageId": "={{ $json.messageId }}"
+      },
+      "id": "5aa4a3cf-7ee0-4411-82a5-4776373be51d",
+      "name": "Fijar mensaje",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        100,
+        -20
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "PON_TU_CREDENCIAL",
+          "name": "SupCe bot"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "93fdc935-5637-4468-8361-7e787fff4628",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "unsubscribe",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": false
+      },
+      "id": "c881ef96-a29d-4d2a-a191-1348416c7e8e",
+      "name": "¿Es baja de suscripción?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        320,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "operation": "unpinChatMessage",
+        "chatId": "={{ $json.chatId }}",
+        "messageId": "={{ $json.unpinMessageId }}"
+      },
+      "id": "248335ac-4f07-4edf-a882-efebc52abecd",
+      "name": "Desfijar mensaje",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        600,
+        680
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "PON_TU_CREDENCIAL",
+          "name": "SupCe bot"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "deleteMessage",
+        "chatId": "={{ $json.chatId }}",
+        "messageId": "={{ $json.unpinMessageId }}"
+      },
+      "id": "a8e573bb-cbbd-413e-833d-b7a2e849272c",
+      "name": "Borrar mensaje",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        600,
+        760
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "PON_TU_CREDENCIAL",
+          "name": "SupCe bot"
+        }
+      },
+      "onError": "continueRegularOutput"
     }
   ],
   "connections": {
@@ -1039,7 +1186,7 @@
       "main": [
         [
           {
-            "node": "Preparar guardado (dashboard)",
+            "node": "Extraer mensaje enviado (por chat)",
             "type": "main",
             "index": 0
           }
@@ -1057,7 +1204,7 @@
       "main": [
         [
           {
-            "node": "Preparar guardado (dashboard)",
+            "node": "Extraer mensaje enviado (por chat)",
             "type": "main",
             "index": 0
           }
@@ -1184,7 +1331,7 @@
         ],
         [
           {
-            "node": "¿Necesita llamar a la API?",
+            "node": "¿Es baja de suscripción?",
             "type": "main",
             "index": 0
           }
@@ -1250,6 +1397,62 @@
         [
           {
             "node": "Responder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extraer mensaje enviado (por chat)": {
+      "main": [
+        [
+          {
+            "node": "Preparar guardado (dashboard)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "¿Hay que fijar?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Hay que fijar?": {
+      "main": [
+        [
+          {
+            "node": "Fijar mensaje",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "¿Es baja de suscripción?": {
+      "main": [
+        [
+          {
+            "node": "Desfijar mensaje",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Borrar mensaje",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Responder",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "¿Necesita llamar a la API?",
             "type": "main",
             "index": 0
           }

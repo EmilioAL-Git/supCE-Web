@@ -5,7 +5,7 @@ import secrets
 from collections import deque
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Body, Depends, FastAPI, Header, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -43,6 +43,14 @@ state = {
 }
 
 history: deque[dict] = deque(maxlen=HISTORY_MAX_POINTS)
+
+# Blob de estado libre para el bot de Telegram (n8n): qué mensaje del
+# dashboard hay que editar, alarmas ya notificadas, confirmaciones
+# pendientes, etc. Vive aquí porque el staticData de workflow de n8n no
+# se puede dar por persistente en todas las instancias (task runner
+# externo) — esta API sí es un proceso único y estable. Se pierde si el
+# contenedor se reinicia, igual que `history`.
+bot_state: dict = {}
 
 client: SeratelAsyncClient | None = None
 poller_task: asyncio.Task | None = None
@@ -169,6 +177,20 @@ async def api_history(limit: int = 100):
     """Histórico de lecturas (medidas + alarmas) en memoria, más recientes al final."""
     limit = max(1, min(limit, HISTORY_MAX_POINTS))
     return {"count": len(history), "max_points": HISTORY_MAX_POINTS, "points": list(history)[-limit:]}
+
+
+@api.get("/bot-state", tags=["info"])
+async def api_get_bot_state():
+    """Blob de estado libre (JSON) para integraciones externas (ej. el workflow n8n del bot de Telegram)."""
+    return bot_state
+
+
+@api.put("/bot-state", tags=["info"])
+async def api_put_bot_state(payload: dict = Body(...)):
+    """Sustituye por completo el blob de estado. El consumidor es responsable de hacer read-modify-write."""
+    global bot_state
+    bot_state = payload
+    return {"ok": True}
 
 
 @api.get("/summary", tags=["info"])

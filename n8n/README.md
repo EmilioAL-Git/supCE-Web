@@ -44,7 +44,7 @@ Se pierde si reimportas el workflow desde cero.
 ### 1. Crea el bot de Telegram
 
 Con [@BotFather](https://t.me/BotFather): `/newbot`, dale un nombre
-(ej. `SeratelControl`). Guarda el token.
+(ej. `SupCe bot`). Guarda el token.
 
 ### 2. Configura la API_KEY, URL y chat_id
 
@@ -61,8 +61,8 @@ mano.
 
 Manda cualquier mensaje al bot (o al grupo donde quieras el dashboard)
 y consulta `https://api.telegram.org/bot<TOKEN>/getUpdates` — el
-`chat.id` de la respuesta es el que necesitas para
-`SERATEL_TG_CHAT_ID`.
+`chat.id` de la respuesta es el que necesitas para la constante
+`CHAT_ID` del nodo "Leer estado y preparar dashboard" (ver paso 2).
 
 ### 4. Averigua tu Telegram user ID
 
@@ -80,11 +80,17 @@ En n8n: *Import from File* → selecciona
 ### 6. Credencial de Telegram
 
 Todos los nodos Telegram del workflow apuntan a una credencial llamada
-`SeratelControl-bot` que no existe todavía en tu instancia — n8n te
-pedirá crearla/asignarla al importar. Crea una credencial tipo
-**Telegram API** con el token de BotFather y asígnala a los 6 nodos
-Telegram (Editar dashboard, Enviar dashboard, Enviar evento, Responder
-callback, Actualizar confirmación, Pedir confirmación, Responder).
+`SupCe bot` que no existe todavía en tu instancia — n8n te pedirá
+crearla/asignarla al importar. Crea una credencial tipo **Telegram
+API** con el token de BotFather y asígnala a los 8 nodos Telegram
+(Comandos y botones, Editar dashboard, Enviar dashboard, Enviar
+evento, Responder callback, Actualizar confirmación, Pedir
+confirmación, Responder).
+
+Los 6 nodos que mandan/editan texto (todos menos "Comandos y botones"
+y "Responder callback") llevan además `appendAttribution: false`, para
+que Telegram no añada el pie "This message was sent automatically
+with n8n" a cada mensaje.
 
 ### 7. Activa el workflow
 
@@ -93,6 +99,12 @@ en <1 minuto, y el Telegram Trigger registra el webhook automáticamente.
 
 ## Notas y limitaciones conocidas
 
+- **Las llamadas a la API van con `$helpers.httpRequest`, no `fetch`.**
+  Esta instancia de n8n corre en un runtime donde `fetch` no existe como
+  global dentro de los nodos Code (a diferencia del workflow de
+  Meshview, más antiguo, que sí podía usarlo) — por eso los nodos
+  "Leer estado y preparar dashboard" y "Procesar comando" usan el
+  helper propio de n8n en su lugar.
 - **Los botones inline** (nodo "Pedir confirmación") usan el formato
   estándar de n8n para teclados inline de Telegram, pero no se ha
   podido probar contra una instancia real al construir este workflow

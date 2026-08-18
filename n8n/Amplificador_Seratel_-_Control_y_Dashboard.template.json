@@ -12,22 +12,72 @@
           ]
         }
       },
-      "id": "9afae6bb-b459-4e1c-9c14-e410c9eee9e6",
+      "id": "2b31df74-8073-4dae-a6b5-c0cd2b9b4d99",
       "name": "Cada minuto (dashboard)",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [
-        -1120,
+        -1600,
         -280
       ]
     },
     {
       "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "// CONFIG — esta instancia de n8n bloquea $env en nodos Code, así que va literal aquí\nconst API_URL = 'http://IP_TAILSCALE_RASPBERRY:8000/api';\nconst API_KEY = 'PON_AQUI_TU_API_KEY';\nconst CHAT_ID = 0; // sustituye por tu chat_id de Telegram\n\nconst staticData = $getWorkflowStaticData('global');\n\nasync function apiGet(path) {\n  const res = await fetch(`${API_URL}${path}`, { headers: { 'X-API-Key': API_KEY } });\n  if (!res.ok) throw new Error(`API ${path} -> HTTP ${res.status}`);\n  return res.json();\n}\n\nfunction fmtNum(n, d = 0) {\n  return (n === null || n === undefined) ? '—' : Number(n).toFixed(d);\n}\n\nconst ALARM_LABELS = {\n  rfl_power_alarm: 'RFL Power',\n  fwd_power_alarm: 'FWD Power',\n  exc_power_alarm: 'EXC. Power',\n  temp_combiner_alarm: 'Temp. Combiner',\n  permanent_fail_alarm: 'Permanent Fail',\n  ext_interlock_alarm: 'Ext. Interlock',\n  control_unit_power_alarm: 'Control Unit Power',\n};\n\nlet status;\nlet apiError = null;\ntry {\n  status = await apiGet('/status');\n} catch (e) {\n  apiError = e.message;\n}\n\nif (apiError) {\n  return [{\n    json: {\n      action: 'dashboard',\n      chatId: CHAT_ID,\n      hasPinned: !!staticData.pinnedMessageId,\n      text: `⚠️ <b>Amplificador FM</b>\\nNo se pudo consultar la API: ${apiError}`,\n    },\n  }];\n}\n\nconst events = [];\nconst wasConnected = staticData.lastConnected === true;\nconst nowConnected = !!status.connected;\n\n// --- Texto del dashboard ---\nconst lines = [];\nlines.push('📻 <b>Amplificador FM — esRadio Albacete</b>');\nif (nowConnected) {\n  const target = status.transport === 'serial' ? status.device : `${status.host}:${status.port}`;\n  lines.push(`🟢 Conectado (${status.transport}) — <code>${target}</code>`);\n} else {\n  lines.push(`⚪ Desconectado${status.last_error ? ` — ${status.last_error}` : ''}`);\n}\n\nconst m = status.measurements;\nconst a = status.alarms;\n\nif (m) {\n  lines.push('');\n  lines.push(`⚡ FWD: <b>${fmtNum(m.fwd_power_w)} W</b> · DC: ${fmtNum(m.vdc_volts, 1)} V`);\n  const amps = m.idc_amps.map((c, i) => `A${i + 1}:${c}${m.current_alarms && m.current_alarms[i] ? '⚠️' : ''}`).join('  ');\n  lines.push(`🔋 ${amps}`);\n}\n\nif (a) {\n  const activas = Object.entries(ALARM_LABELS).filter(([k]) => a[k]).map(([, v]) => v);\n  lines.push('');\n  lines.push(activas.length ? `🚨 <b>Alarmas:</b> ${activas.join(', ')}` : '✅ Sin alarmas activas');\n}\n\nlines.push('');\nlines.push(`<i>Actualizado: ${new Date().toLocaleString('es-ES', { timeZone: 'Europe/Madrid' })}</i>`);\n\nevents.push({\n  json: {\n    action: 'dashboard',\n    chatId: CHAT_ID,\n    hasPinned: !!staticData.pinnedMessageId,\n    text: lines.join('\\n'),\n  },\n});\n\n// --- Detección de eventos (transición de alarmas / conexión) ---\nif (a) {\n  const prevAlarms = staticData.lastAlarms || {};\n  for (const [key, label] of Object.entries(ALARM_LABELS)) {\n    const now = !!a[key];\n    const before = !!prevAlarms[key];\n    if (now && !before) {\n      events.push({ json: { action: 'alerta', chatId: CHAT_ID, text: `🚨 <b>Alarma activada:</b> ${label}` } });\n    } else if (!now && before) {\n      events.push({ json: { action: 'alerta', chatId: CHAT_ID, text: `✅ <b>Alarma resuelta:</b> ${label}` } });\n    }\n  }\n  staticData.lastAlarms = a;\n}\n\nif (nowConnected && !wasConnected) {\n  events.push({ json: { action: 'alerta', chatId: CHAT_ID, text: `🟢 <b>Conectado</b> al amplificador (${status.transport})` } });\n} else if (!nowConnected && wasConnected) {\n  events.push({ json: { action: 'alerta', chatId: CHAT_ID, text: `⚪ <b>Desconectado</b> del amplificador${status.last_error ? ` — ${status.last_error}` : ''}` } });\n}\nstaticData.lastConnected = nowConnected;\n\nreturn events;\n"
+        "method": "GET",
+        "url": "http://IP_TAILSCALE_RASPBERRY:8000/api/bot-state",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "PON_AQUI_TU_API_KEY"
+            }
+          ]
+        },
+        "options": {}
       },
-      "id": "accfba6c-f810-465f-8720-5b221fbc79d2",
-      "name": "Leer estado y preparar dashboard",
+      "id": "175b8794-c728-4d37-a541-da9a02716d02",
+      "name": "GET bot-state (dashboard)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1360,
+        -280
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://IP_TAILSCALE_RASPBERRY:8000/api/status",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "PON_AQUI_TU_API_KEY"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "78961e93-30cb-4c05-a32e-763236b2b8aa",
+      "name": "GET /status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1120,
+        -280
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// CONFIG\nconst CHAT_ID = 0; // sustituye por tu chat_id de Telegram\n\nfunction fmtNum(n, d = 0) {\n  return (n === null || n === undefined) ? '—' : Number(n).toFixed(d);\n}\n\nconst ALARM_LABELS = {\n  rfl_power_alarm: 'RFL Power',\n  fwd_power_alarm: 'FWD Power',\n  exc_power_alarm: 'EXC. Power',\n  temp_combiner_alarm: 'Temp. Combiner',\n  permanent_fail_alarm: 'Permanent Fail',\n  ext_interlock_alarm: 'Ext. Interlock',\n  control_unit_power_alarm: 'Control Unit Power',\n};\n\nconst botState = $('GET bot-state (dashboard)').item.json;\nconst input = $input.first().json;\n\nif (input.connected === undefined) {\n  const raw = input.error !== undefined\n    ? (typeof input.error === 'string' ? input.error : (input.error && input.error.message) || JSON.stringify(input.error))\n    : 'error desconocido';\n  return [{\n    json: {\n      action: 'dashboard',\n      chatId: CHAT_ID,\n      hasPinned: !!botState.pinnedMessageId,\n      messageId: botState.pinnedMessageId || null,\n      nextBotState: { ...botState },\n      text: `⚠️ <b>Amplificador FM</b>\\nNo se pudo consultar la API: ${raw}`,\n    },\n  }];\n}\n\nconst status = input;\nconst events = [];\nconst wasConnected = botState.lastConnected === true;\nconst nowConnected = !!status.connected;\n\nconst lines = [];\nlines.push('📻 <b>Amplificador FM — esRadio Albacete</b>');\nif (nowConnected) {\n  const target = status.transport === 'serial' ? status.device : `${status.host}:${status.port}`;\n  lines.push(`🟢 Conectado (${status.transport}) — <code>${target}</code>`);\n} else {\n  lines.push(`⚪ Desconectado${status.last_error ? ` — ${status.last_error}` : ''}`);\n}\n\nconst m = status.measurements;\nconst a = status.alarms;\n\nif (m) {\n  lines.push('');\n  lines.push(`⚡ FWD: <b>${fmtNum(m.fwd_power_w)} W</b> · DC: ${fmtNum(m.vdc_volts, 1)} V`);\n  const amps = m.idc_amps.map((c, i) => `A${i + 1}:${c}${m.current_alarms && m.current_alarms[i] ? '⚠️' : ''}`).join('  ');\n  lines.push(`🔋 ${amps}`);\n}\n\nif (a) {\n  const activas = Object.entries(ALARM_LABELS).filter(([k]) => a[k]).map(([, v]) => v);\n  lines.push('');\n  lines.push(activas.length ? `🚨 <b>Alarmas:</b> ${activas.join(', ')}` : '✅ Sin alarmas activas');\n}\n\nlines.push('');\nlines.push(`<i>Actualizado: ${new Date().toLocaleString('es-ES', { timeZone: 'Europe/Madrid' })}</i>`);\n\n// Estado que hay que persistir tras este ciclo (pinnedMessageId se\n// completa más adelante, tras mandar/editar el mensaje de Telegram).\nconst nextBotState = { ...botState, lastAlarms: a || botState.lastAlarms || null, lastConnected: nowConnected };\n\nevents.push({\n  json: {\n    action: 'dashboard',\n    chatId: CHAT_ID,\n    hasPinned: !!botState.pinnedMessageId,\n    messageId: botState.pinnedMessageId || null,\n    nextBotState,\n    text: lines.join('\\n'),\n  },\n});\n\nif (a) {\n  const prevAlarms = botState.lastAlarms || {};\n  for (const [key, label] of Object.entries(ALARM_LABELS)) {\n    const now = !!a[key];\n    const before = !!prevAlarms[key];\n    if (now && !before) {\n      events.push({ json: { action: 'alerta', chatId: CHAT_ID, text: `🚨 <b>Alarma activada:</b> ${label}` } });\n    } else if (!now && before) {\n      events.push({ json: { action: 'alerta', chatId: CHAT_ID, text: `✅ <b>Alarma resuelta:</b> ${label}` } });\n    }\n  }\n}\n\nif (nowConnected && !wasConnected) {\n  events.push({ json: { action: 'alerta', chatId: CHAT_ID, text: `🟢 <b>Conectado</b> al amplificador (${status.transport})` } });\n} else if (!nowConnected && wasConnected) {\n  events.push({ json: { action: 'alerta', chatId: CHAT_ID, text: `⚪ <b>Desconectado</b> del amplificador${status.last_error ? ` — ${status.last_error}` : ''}` } });\n}\n\nreturn events;\n"
+      },
+      "id": "30895139-c924-4655-8055-578b6b111c5b",
+      "name": "Preparar dashboard",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
@@ -45,7 +95,7 @@
           },
           "conditions": [
             {
-              "id": "bd1613f2-78c2-4a95-b5a8-bead9d3ac180",
+              "id": "e8b9330b-3174-454f-bc0a-f112f87c411e",
               "leftValue": "={{ $json.action }}",
               "rightValue": "dashboard",
               "operator": {
@@ -58,7 +108,7 @@
         },
         "looseTypeValidation": false
       },
-      "id": "3284a150-121e-4863-b368-62b9cdc48595",
+      "id": "62a179bd-b57c-4360-936a-ef7a813dcb39",
       "name": "¿Es evento de dashboard?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
@@ -77,11 +127,11 @@
           },
           "conditions": [
             {
-              "id": "27355c60-2389-49f6-949e-ac5833e68867",
+              "id": "bedcecd4-6f28-4b0c-8057-ca07cef142b8",
               "leftValue": "={{ $json.hasPinned }}",
-              "rightValue": "true",
+              "rightValue": true,
               "operator": {
-                "type": "string",
+                "type": "boolean",
                 "operation": "equals"
               }
             }
@@ -90,7 +140,7 @@
         },
         "looseTypeValidation": false
       },
-      "id": "ee8d3a3c-0776-4138-b32b-a1f8b9a54d88",
+      "id": "f8bae841-a5ac-4bad-a48a-e99837c7c9ab",
       "name": "¿Hay mensaje fijado?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
@@ -106,10 +156,136 @@
         "messageId": "={{ $json.messageId }}",
         "text": "={{ $json.text }}",
         "additionalFields": {
-          "parse_mode": "HTML"
+          "parse_mode": "HTML",
+          "appendAttribution": false
+        },
+        "replyMarkup": "inlineKeyboard",
+        "inlineKeyboard": {
+          "rows": [
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "⬆️ Subir",
+                    "additionalFields": {
+                      "callback_data": "menu:subir"
+                    }
+                  },
+                  {
+                    "text": "⬇️ Bajar",
+                    "additionalFields": {
+                      "callback_data": "menu:bajar"
+                    }
+                  },
+                  {
+                    "text": "🔺 Máxima",
+                    "additionalFields": {
+                      "callback_data": "menu:maxima"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "40%",
+                    "additionalFields": {
+                      "callback_data": "menu:pot40"
+                    }
+                  },
+                  {
+                    "text": "50%",
+                    "additionalFields": {
+                      "callback_data": "menu:pot50"
+                    }
+                  },
+                  {
+                    "text": "60%",
+                    "additionalFields": {
+                      "callback_data": "menu:pot60"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "70%",
+                    "additionalFields": {
+                      "callback_data": "menu:pot70"
+                    }
+                  },
+                  {
+                    "text": "80%",
+                    "additionalFields": {
+                      "callback_data": "menu:pot80"
+                    }
+                  },
+                  {
+                    "text": "90%",
+                    "additionalFields": {
+                      "callback_data": "menu:pot90"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "📊 Estado",
+                    "additionalFields": {
+                      "callback_data": "menu:estado"
+                    }
+                  },
+                  {
+                    "text": "🚨 Alarmas",
+                    "additionalFields": {
+                      "callback_data": "menu:alarmas"
+                    }
+                  },
+                  {
+                    "text": "📜 Log",
+                    "additionalFields": {
+                      "callback_data": "menu:log"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "▶️ Arrancar",
+                    "additionalFields": {
+                      "callback_data": "menu:arrancar"
+                    }
+                  },
+                  {
+                    "text": "⏹ Parar",
+                    "additionalFields": {
+                      "callback_data": "menu:parar"
+                    }
+                  },
+                  {
+                    "text": "🔄 Reset",
+                    "additionalFields": {
+                      "callback_data": "menu:reset"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
         }
       },
-      "id": "ec1f7197-bc98-4598-b8d9-9f50f5370512",
+      "id": "140b77ff-0d9e-4042-8eae-b9e661212687",
       "name": "Editar dashboard",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
@@ -120,7 +296,7 @@
       "credentials": {
         "telegramApi": {
           "id": "PON_TU_CREDENCIAL",
-          "name": "SeratelControl-bot"
+          "name": "SupCe bot"
         }
       },
       "onError": "continueErrorOutput"
@@ -130,10 +306,136 @@
         "chatId": "={{ $json.chatId }}",
         "text": "={{ $json.text }}",
         "additionalFields": {
-          "parse_mode": "HTML"
+          "parse_mode": "HTML",
+          "appendAttribution": false
+        },
+        "replyMarkup": "inlineKeyboard",
+        "inlineKeyboard": {
+          "rows": [
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "⬆️ Subir",
+                    "additionalFields": {
+                      "callback_data": "menu:subir"
+                    }
+                  },
+                  {
+                    "text": "⬇️ Bajar",
+                    "additionalFields": {
+                      "callback_data": "menu:bajar"
+                    }
+                  },
+                  {
+                    "text": "🔺 Máxima",
+                    "additionalFields": {
+                      "callback_data": "menu:maxima"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "40%",
+                    "additionalFields": {
+                      "callback_data": "menu:pot40"
+                    }
+                  },
+                  {
+                    "text": "50%",
+                    "additionalFields": {
+                      "callback_data": "menu:pot50"
+                    }
+                  },
+                  {
+                    "text": "60%",
+                    "additionalFields": {
+                      "callback_data": "menu:pot60"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "70%",
+                    "additionalFields": {
+                      "callback_data": "menu:pot70"
+                    }
+                  },
+                  {
+                    "text": "80%",
+                    "additionalFields": {
+                      "callback_data": "menu:pot80"
+                    }
+                  },
+                  {
+                    "text": "90%",
+                    "additionalFields": {
+                      "callback_data": "menu:pot90"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "📊 Estado",
+                    "additionalFields": {
+                      "callback_data": "menu:estado"
+                    }
+                  },
+                  {
+                    "text": "🚨 Alarmas",
+                    "additionalFields": {
+                      "callback_data": "menu:alarmas"
+                    }
+                  },
+                  {
+                    "text": "📜 Log",
+                    "additionalFields": {
+                      "callback_data": "menu:log"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "▶️ Arrancar",
+                    "additionalFields": {
+                      "callback_data": "menu:arrancar"
+                    }
+                  },
+                  {
+                    "text": "⏹ Parar",
+                    "additionalFields": {
+                      "callback_data": "menu:parar"
+                    }
+                  },
+                  {
+                    "text": "🔄 Reset",
+                    "additionalFields": {
+                      "callback_data": "menu:reset"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
         }
       },
-      "id": "4f273a9c-e4e5-4e96-9873-026b86ca5a21",
+      "id": "13933d01-63c5-4434-96aa-b826aa851066",
       "name": "Enviar dashboard",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
@@ -144,17 +446,17 @@
       "credentials": {
         "telegramApi": {
           "id": "PON_TU_CREDENCIAL",
-          "name": "SeratelControl-bot"
+          "name": "SupCe bot"
         }
       }
     },
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const staticData = $getWorkflowStaticData('global');\nstaticData.pinnedMessageId = $input.first().json.message_id;\nreturn $input.all();\n"
+        "jsCode": "// Se ejecuta tras mandar/editar el mensaje del dashboard en Telegram.\n// $json es la respuesta de Telegram (trae message_id); recuperamos el\n// resto del estado ya calculado en \"Preparar dashboard\".\nconst prepared = $('Preparar dashboard').item.json;\nconst sentMessageId = $input.first().json.message_id;\nreturn [{\n  json: {\n    ...prepared.nextBotState,\n    pinnedMessageId: sentMessageId || prepared.messageId || null,\n  },\n}];\n"
       },
-      "id": "11d457e4-b417-4966-aad0-2f7e02d22741",
-      "name": "Guardar ID de mensaje",
+      "id": "3fe19db7-6a8c-4ec1-86d5-4ba4de7a68d2",
+      "name": "Preparar guardado (dashboard)",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
@@ -164,13 +466,41 @@
     },
     {
       "parameters": {
+        "method": "PUT",
+        "url": "http://IP_TAILSCALE_RASPBERRY:8000/api/bot-state",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "PON_AQUI_TU_API_KEY"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "a7c5397e-f345-4be2-81e8-f61119c89dd2",
+      "name": "PUT bot-state (dashboard)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        340,
+        -280
+      ]
+    },
+    {
+      "parameters": {
         "chatId": "={{ $json.chatId }}",
         "text": "={{ $json.text }}",
         "additionalFields": {
-          "parse_mode": "HTML"
+          "parse_mode": "HTML",
+          "appendAttribution": false
         }
       },
-      "id": "b3e144a5-6a66-4c1e-a6f5-2a0ba6e1c6ae",
+      "id": "0577ad58-b706-4a22-af54-cef82370279c",
       "name": "Enviar evento",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
@@ -181,7 +511,7 @@
       "credentials": {
         "telegramApi": {
           "id": "PON_TU_CREDENCIAL",
-          "name": "SeratelControl-bot"
+          "name": "SupCe bot"
         }
       }
     },
@@ -192,33 +522,58 @@
           "callback_query"
         ]
       },
-      "id": "3a6219b5-226f-4f1f-afdb-ccf1ffe9cf18",
+      "id": "ff458596-1ee6-4659-84ec-255fe5fba166",
       "name": "Comandos y botones",
       "type": "n8n-nodes-base.telegramTrigger",
       "typeVersion": 1.1,
       "position": [
-        -1120,
+        -1600,
         240
       ],
-      "webhookId": "d30abfa5-6154-41dc-8390-78b4fd303ef5",
+      "webhookId": "5fdc9f01-ad3e-495a-a270-7fc19d7e6de9",
       "credentials": {
         "telegramApi": {
           "id": "PON_TU_CREDENCIAL",
-          "name": "SeratelControl-bot"
+          "name": "SupCe bot"
         }
       }
     },
     {
       "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "// CONFIG — esta instancia de n8n bloquea $env en nodos Code, así que va literal aquí\nconst API_URL = 'http://IP_TAILSCALE_RASPBERRY:8000/api';\nconst API_KEY = 'PON_AQUI_TU_API_KEY';\nconst AUTHORIZED_USERS = [0]; // sustituye por los Telegram user IDs autorizados\nconst CONFIRM_TIMEOUT_MS = 60 * 1000;\nconst RISKY_LABELS = {\n  arrancar: 'ARRANCAR el transmisor',\n  parar: 'PARAR el transmisor',\n  reset: 'resetear las alarmas',\n};\nconst RISKY_ENDPOINTS = { arrancar: '/start', parar: '/stop', reset: '/reset' };\n\nconst staticData = $getWorkflowStaticData('global');\nconst update = $input.first().json;\n\nasync function apiCall(path, method = 'GET', body = null) {\n  const res = await fetch(`${API_URL}${path}`, {\n    method,\n    headers: { 'X-API-Key': API_KEY, 'Content-Type': 'application/json' },\n    body: body ? JSON.stringify(body) : undefined,\n  });\n  const data = await res.json().catch(() => ({}));\n  if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);\n  return data;\n}\n\nfunction reply(chatId, messageId, text) {\n  return { json: { action: 'reply', chatId, replyToMessageId: messageId, text } };\n}\n\n// ---------- Callback (botón Confirmar/Cancelar) ----------\nif (update.callback_query) {\n  const cb = update.callback_query;\n  const fromId = cb.from.id;\n  const chatId = cb.message.chat.id;\n  const messageId = cb.message.message_id;\n  const queryId = cb.id;\n\n  const ack = { json: { action: 'callbackAck', queryId } };\n\n  if (!AUTHORIZED_USERS.includes(fromId)) {\n    return [ack, { json: { action: 'editConfirm', chatId, messageId, text: '🔒 No autorizado.' } }];\n  }\n\n  const pending = staticData.pendingConfirm;\n  const [kind, nonce] = String(cb.data || '').split(':');\n\n  if (!pending || pending.nonce !== nonce || Date.now() > pending.expiresAt) {\n    return [ack, { json: { action: 'editConfirm', chatId, messageId, text: '⌛ Confirmación caducada o inválida. Repite el comando.' } }];\n  }\n\n  staticData.pendingConfirm = null;\n\n  if (kind === 'cancel') {\n    return [ack, { json: { action: 'editConfirm', chatId, messageId, text: `❎ ${RISKY_LABELS[pending.action]} — cancelado.` } }];\n  }\n\n  try {\n    const data = await apiCall(RISKY_ENDPOINTS[pending.action], 'POST');\n    return [ack, { json: { action: 'editConfirm', chatId, messageId, text: `✅ ${RISKY_LABELS[pending.action]} — hecho (${data.raw_hex || data.ack_hex || 'ok'}).` } }];\n  } catch (e) {\n    return [ack, { json: { action: 'editConfirm', chatId, messageId, text: `❌ Error al ${RISKY_LABELS[pending.action]}: ${e.message}` } }];\n  }\n}\n\n// ---------- Mensaje de texto ----------\nconst msg = update.message;\nif (!msg || !msg.text) return [];\n\nconst fromId = msg.from.id;\nconst chatId = msg.chat.id;\nconst messageId = msg.message_id;\nconst text = msg.text.trim();\n\nif (!AUTHORIZED_USERS.includes(fromId)) {\n  return [reply(chatId, messageId, '🔒 No autorizado.')];\n}\n\nconst [cmdRaw, ...args] = text.split(/\\s+/);\nconst cmd = cmdRaw.toLowerCase().replace(/^\\//, '').split('@')[0];\n\ntry {\n  switch (cmd) {\n    case 'ayuda':\n    case 'help':\n      return [reply(chatId, messageId,\n        '<b>Comandos disponibles</b>\\n' +\n        '/estado — resumen del amplificador\\n' +\n        '/alarmas — detalle de alarmas\\n' +\n        '/log [n] — últimas n lecturas (por defecto 5)\\n' +\n        '/subir — +50W\\n' +\n        '/bajar — −50W\\n' +\n        '/potencia 40|50|60|70|80|90 — preset de potencia\\n' +\n        '/maxima — potencia máxima\\n' +\n        '/arrancar — Start (pide confirmación)\\n' +\n        '/parar — Stop (pide confirmación)\\n' +\n        '/reset — reset de alarmas (pide confirmación)\\n' +\n        '/conectar host puerto — conectar por red (ser2net)\\n' +\n        '/conectar serial /dev/ttyUSB0 — conectar por puerto serie directo\\n' +\n        '/desconectar — cerrar la conexión'\n      )];\n\n    case 'estado': {\n      const data = await apiCall('/summary');\n      return [reply(chatId, messageId, data.text)];\n    }\n\n    case 'alarmas': {\n      const a = await apiCall('/alarms');\n      const ALARM_LABELS = {\n        rfl_power_alarm: 'RFL Power', fwd_power_alarm: 'FWD Power', exc_power_alarm: 'EXC. Power',\n        temp_combiner_alarm: 'Temp. Combiner', permanent_fail_alarm: 'Permanent Fail',\n        ext_interlock_alarm: 'Ext. Interlock', control_unit_power_alarm: 'Control Unit Power',\n      };\n      const activas = Object.entries(ALARM_LABELS).filter(([k]) => a[k]).map(([, v]) => v);\n      return [reply(chatId, messageId, activas.length ? `🚨 Alarmas activas: ${activas.join(', ')}` : '✅ Sin alarmas activas')];\n    }\n\n    case 'log': {\n      const n = Math.max(1, Math.min(parseInt(args[0], 10) || 5, 50));\n      const data = await apiCall(`/history?limit=${n}`);\n      if (!data.points.length) return [reply(chatId, messageId, 'Sin lecturas en el histórico todavía.')];\n      const lines = data.points.map(p => {\n        const m = p.measurements;\n        return `${p.timestamp} — FWD ${m ? m.fwd_power_w : '—'}W, DC ${m ? m.vdc_volts : '—'}V`;\n      });\n      return [reply(chatId, messageId, `<b>Últimas ${data.points.length} lecturas:</b>\\n` + lines.join('\\n'))];\n    }\n\n    case 'subir': {\n      const data = await apiCall('/power/up', 'POST');\n      return [reply(chatId, messageId, `⬆️ Potencia subida (${data.raw_hex}).`)];\n    }\n\n    case 'bajar': {\n      const data = await apiCall('/power/down', 'POST');\n      return [reply(chatId, messageId, `⬇️ Potencia bajada (${data.raw_hex}).`)];\n    }\n\n    case 'potencia': {\n      const pct = parseInt(args[0], 10);\n      if (![40, 50, 60, 70, 80, 90].includes(pct)) {\n        return [reply(chatId, messageId, 'Uso: /potencia 40|50|60|70|80|90')];\n      }\n      const data = await apiCall('/power/set', 'POST', { percent: pct });\n      return [reply(chatId, messageId, `🎚️ Potencia fijada al ${pct}% (${data.raw_hex}).`)];\n    }\n\n    case 'maxima': {\n      const data = await apiCall('/power/max', 'POST');\n      return [reply(chatId, messageId, `🔺 Potencia máxima fijada (${data.raw_hex}).`)];\n    }\n\n    case 'conectar': {\n      let body;\n      if (args[0] === 'serial') {\n        if (!args[1]) return [reply(chatId, messageId, 'Uso: /conectar serial /dev/ttyUSB0')];\n        body = { device: args[1] };\n      } else {\n        const [host, port] = args;\n        if (!host || !port) return [reply(chatId, messageId, 'Uso: /conectar <ip> <puerto>  ó  /conectar serial <device>')];\n        body = { host, port: parseInt(port, 10) };\n      }\n      const data = await apiCall('/connect', 'POST', body);\n      const target = data.transport === 'serial' ? data.device : `${data.host}:${data.port}`;\n      return [reply(chatId, messageId, `🔌 Conectado — ${target} (${data.transport}).`)];\n    }\n\n    case 'desconectar': {\n      await apiCall('/disconnect', 'POST');\n      return [reply(chatId, messageId, '🔌 Desconectado.')];\n    }\n\n    case 'arrancar':\n    case 'parar':\n    case 'reset': {\n      const nonce = String(Date.now());\n      staticData.pendingConfirm = { action: cmd, nonce, expiresAt: Date.now() + CONFIRM_TIMEOUT_MS };\n      return [{\n        json: {\n          action: 'sendConfirm',\n          chatId,\n          replyToMessageId: messageId,\n          text: `⚠️ ¿Seguro que quieres <b>${RISKY_LABELS[cmd]}</b>? Caduca en ${CONFIRM_TIMEOUT_MS / 1000}s.`,\n          confirmData: `confirm:${nonce}`,\n          cancelData: `cancel:${nonce}`,\n        },\n      }];\n    }\n\n    default:\n      return [reply(chatId, messageId, `Comando no reconocido: ${cmdRaw}. Usa /ayuda.`)];\n  }\n} catch (e) {\n  return [reply(chatId, messageId, `❌ Error: ${e.message}`)];\n}\n"
+        "method": "GET",
+        "url": "http://IP_TAILSCALE_RASPBERRY:8000/api/bot-state",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "PON_AQUI_TU_API_KEY"
+            }
+          ]
+        },
+        "options": {}
       },
-      "id": "267936df-9718-47e0-9e82-bc408a67c817",
+      "id": "b0be3f03-d12b-4a08-9ab4-f37990182ae7",
+      "name": "GET bot-state (cmd)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1360,
+        240
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// CONFIG\nconst AUTHORIZED_USERS = [0]; // sustituye por los Telegram user IDs autorizados\nconst CONFIRM_TIMEOUT_MS = 60 * 1000;\nconst RISKY_LABELS = {\n  arrancar: 'ARRANCAR el transmisor',\n  parar: 'PARAR el transmisor',\n  reset: 'resetear las alarmas',\n};\nconst RISKY_ENDPOINTS = { arrancar: '/start', parar: '/stop', reset: '/reset' };\n\n// Botones del dashboard (callback_data \"menu:<clave>\") -> comando + argumentos.\nconst MENU_ACTIONS = {\n  subir: ['subir', []],\n  bajar: ['bajar', []],\n  maxima: ['maxima', []],\n  pot40: ['potencia', ['40']],\n  pot50: ['potencia', ['50']],\n  pot60: ['potencia', ['60']],\n  pot70: ['potencia', ['70']],\n  pot80: ['potencia', ['80']],\n  pot90: ['potencia', ['90']],\n  estado: ['estado', []],\n  alarmas: ['alarmas', []],\n  log: ['log', []],\n  arrancar: ['arrancar', []],\n  parar: ['parar', []],\n  reset: ['reset', []],\n};\n\nconst botState = $('GET bot-state (cmd)').item.json;\n\n// El resultado de un comando/botón se EDITA sobre el último que se mandó\n// en ese chat (botState.lastReplyMessageIds), en vez de mandar mensaje\n// nuevo cada vez. nextBotState viaja con el item para que, más adelante,\n// el paso que guarda pendingConfirm no pise nada.\nfunction reply(chatId, messageId, text, nextBotState) {\n  const lastReplyMessageIds = (nextBotState || botState).lastReplyMessageIds || {};\n  return {\n    json: {\n      action: 'reply',\n      chatId,\n      replyToMessageId: messageId,\n      text,\n      hasReplyPinned: !!lastReplyMessageIds[chatId],\n      replyMessageId: lastReplyMessageIds[chatId] || null,\n      nextBotState: nextBotState || botState,\n    },\n  };\n}\n\nfunction apiCall(httpMethod, httpPath, httpBody, replyKind, ctx, nextBotState) {\n  return { json: { action: 'apiCall', httpMethod, httpPath, httpBody: httpBody || null, replyKind, nextBotState: nextBotState || botState, ...ctx } };\n}\n\n// Despacho compartido entre comandos escritos (/subir) y botones del dashboard.\nfunction dispatchCommand(cmd, args, chatId, replyToMessageId, nextBotState) {\n  const ctx = { chatId, replyToMessageId };\n  switch (cmd) {\n    case 'ayuda':\n    case 'help':\n      return [reply(chatId, replyToMessageId,\n        '<b>Comandos disponibles</b>\\n' +\n        '/estado — resumen del amplificador\\n' +\n        '/alarmas — detalle de alarmas\\n' +\n        '/log [n] — últimas n lecturas (por defecto 5)\\n' +\n        '/subir — +50W\\n' +\n        '/bajar — −50W\\n' +\n        '/potencia 40|50|60|70|80|90 — preset de potencia\\n' +\n        '/maxima — potencia máxima\\n' +\n        '/arrancar — Start (pide confirmación)\\n' +\n        '/parar — Stop (pide confirmación)\\n' +\n        '/reset — reset de alarmas (pide confirmación)\\n' +\n        '/conectar host puerto — conectar por red (ser2net)\\n' +\n        '/conectar serial /dev/ttyUSB0 — conectar por puerto serie directo\\n' +\n        '/desconectar — cerrar la conexión\\n\\n' +\n        'También puedes usar los botones debajo del dashboard.',\n        nextBotState\n      )];\n\n    case 'estado':\n      return [apiCall('GET', '/summary', null, 'estado', ctx, nextBotState)];\n\n    case 'alarmas':\n      return [apiCall('GET', '/alarms', null, 'alarmas', ctx, nextBotState)];\n\n    case 'log': {\n      const n = Math.max(1, Math.min(parseInt(args[0], 10) || 5, 50));\n      return [apiCall('GET', `/history?limit=${n}`, null, 'log', ctx, nextBotState)];\n    }\n\n    case 'subir':\n      return [apiCall('POST', '/power/up', null, 'subir', ctx, nextBotState)];\n\n    case 'bajar':\n      return [apiCall('POST', '/power/down', null, 'bajar', ctx, nextBotState)];\n\n    case 'potencia': {\n      const pct = parseInt(args[0], 10);\n      if (![40, 50, 60, 70, 80, 90].includes(pct)) {\n        return [reply(chatId, replyToMessageId, 'Uso: /potencia 40|50|60|70|80|90', nextBotState)];\n      }\n      return [apiCall('POST', '/power/set', { percent: pct }, 'potencia', { ...ctx, pct }, nextBotState)];\n    }\n\n    case 'maxima':\n      return [apiCall('POST', '/power/max', null, 'maxima', ctx, nextBotState)];\n\n    case 'conectar': {\n      let body;\n      if (args[0] === 'serial') {\n        if (!args[1]) return [reply(chatId, replyToMessageId, 'Uso: /conectar serial [device]', nextBotState)];\n        body = { device: args[1] };\n      } else {\n        const [host, port] = args;\n        if (!host || !port) return [reply(chatId, replyToMessageId, 'Uso: /conectar [ip] [puerto]  ó  /conectar serial [device]', nextBotState)];\n        body = { host, port: parseInt(port, 10) };\n      }\n      return [apiCall('POST', '/connect', body, 'conectar', ctx, nextBotState)];\n    }\n\n    case 'desconectar':\n      return [apiCall('POST', '/disconnect', null, 'desconectar', ctx, nextBotState)];\n\n    case 'arrancar':\n    case 'parar':\n    case 'reset': {\n      const nonce = String(Date.now());\n      const withPending = { ...(nextBotState || botState), pendingConfirm: { action: cmd, nonce, expiresAt: Date.now() + CONFIRM_TIMEOUT_MS } };\n      return [{\n        json: {\n          action: 'sendConfirm',\n          chatId,\n          replyToMessageId,\n          text: `⚠️ ¿Seguro que quieres <b>${RISKY_LABELS[cmd]}</b>? Caduca en ${CONFIRM_TIMEOUT_MS / 1000}s.`,\n          confirmData: `confirm:${nonce}`,\n          cancelData: `cancel:${nonce}`,\n          nextBotState: withPending,\n        },\n      }];\n    }\n\n    default:\n      return [reply(chatId, replyToMessageId, `Comando no reconocido: /${cmd}. Usa /ayuda.`, nextBotState)];\n  }\n}\n\nconst update = $input.first().json;\n\n// ---------- Callback (botones: confirmar/cancelar, o menú del dashboard) ----------\nif (update.callback_query) {\n  const cb = update.callback_query;\n  const fromId = cb.from.id;\n  const chatId = cb.message.chat.id;\n  const messageId = cb.message.message_id;\n  const queryId = cb.id;\n  const data = String(cb.data || '');\n\n  const ack = { json: { action: 'callbackAck', queryId } };\n\n  if (!AUTHORIZED_USERS.includes(fromId)) {\n    return [ack, { json: { action: 'editConfirm', chatId, messageId, text: '🔒 No autorizado.', nextBotState: botState } }];\n  }\n\n  // Botones del dashboard: misma lógica que un comando escrito, respondiendo\n  // como mensaje nuevo (no se toca el propio mensaje del dashboard).\n  if (data.startsWith('menu:')) {\n    const mapped = MENU_ACTIONS[data.slice('menu:'.length)];\n    if (!mapped) return [ack];\n    const [cmd, args] = mapped;\n    return [ack, ...dispatchCommand(cmd, args, chatId, messageId, botState)];\n  }\n\n  // Confirmar/Cancelar de una acción de riesgo pendiente\n  const pending = botState.pendingConfirm;\n  const [kind, nonce] = data.split(':');\n\n  if (!pending || pending.nonce !== nonce || Date.now() > pending.expiresAt) {\n    return [ack, { json: { action: 'editConfirm', chatId, messageId, text: '⌛ Confirmación caducada o inválida. Repite el comando.', nextBotState: botState } }];\n  }\n\n  const clearedState = { ...botState, pendingConfirm: null };\n\n  if (kind === 'cancel') {\n    return [ack, { json: { action: 'editConfirm', chatId, messageId, text: `❎ ${RISKY_LABELS[pending.action]} — cancelado.`, nextBotState: clearedState } }];\n  }\n\n  return [ack, apiCall('POST', RISKY_ENDPOINTS[pending.action], null, 'confirmExec', {\n    chatId, messageId, pendingActionLabel: RISKY_LABELS[pending.action],\n  }, clearedState)];\n}\n\n// ---------- Mensaje de texto ----------\nconst msg = update.message;\nif (!msg || !msg.text) return [];\n\nconst fromId = msg.from.id;\nconst chatId = msg.chat.id;\nconst messageId = msg.message_id;\nconst text = msg.text.trim();\n\nif (!AUTHORIZED_USERS.includes(fromId)) {\n  return [reply(chatId, messageId, '🔒 No autorizado.', botState)];\n}\n\nconst [cmdRaw, ...args] = text.split(/\\s+/);\nconst cmd = cmdRaw.toLowerCase().replace(/^\\//, '').split('@')[0];\n\nreturn dispatchCommand(cmd, args, chatId, messageId, botState);\n"
+      },
+      "id": "db2f3e58-b153-45be-9bd5-afc16369b8fc",
       "name": "Procesar comando",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -880,
+        -1120,
         240
       ]
     },
@@ -232,7 +587,7 @@
           },
           "conditions": [
             {
-              "id": "e5f255b2-da1a-4198-b12b-37c19488a8df",
+              "id": "3330c337-8b83-4a2f-8bb7-3be4a4666b95",
               "leftValue": "={{ $json.action }}",
               "rightValue": "callbackAck",
               "operator": {
@@ -245,13 +600,54 @@
         },
         "looseTypeValidation": false
       },
-      "id": "605ce305-72f2-40cc-9ed2-45b87c434158",
+      "id": "58a456f5-0c24-4d6a-bece-f05ece3ba0d5",
       "name": "¿Es respuesta de callback?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
-        -640,
+        -880,
         240
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "http://IP_TAILSCALE_RASPBERRY:8000/api/bot-state",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "PON_AQUI_TU_API_KEY"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "057e18d3-d333-4994-a3f4-2f6c9eaf0d13",
+      "name": "PUT bot-state (pendingConfirm)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -640,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Guarda pendingConfirm (y cualquier otro cambio ya calculado) justo\n// después de \"Procesar comando\", antes de seguir enrutando la\n// respuesta. $json aquí es la respuesta del PUT; recuperamos el resto\n// desde el nodo IF anterior (que solo deja pasar el item, sin tocarlo).\nreturn [{ json: $('¿Es respuesta de callback?').item.json }];\n"
+      },
+      "id": "57773d1a-3c0d-4e99-9842-5fda52dff877",
+      "name": "Restaurar tras guardar pendingConfirm",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -400,
+        320
       ]
     },
     {
@@ -264,7 +660,7 @@
           },
           "conditions": [
             {
-              "id": "4e6921a5-73e3-4d1e-b601-71bed3e45d5b",
+              "id": "d6a8099e-b2dd-41cf-8bdc-f2882807242b",
               "leftValue": "={{ $json.action }}",
               "rightValue": "editConfirm",
               "operator": {
@@ -277,12 +673,12 @@
         },
         "looseTypeValidation": false
       },
-      "id": "60f278b4-a6bf-47f2-9daf-6b7126ab12db",
+      "id": "df272601-2229-49e2-8679-d23876c7c9fa",
       "name": "¿Es edición de confirmación?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
-        -380,
+        -160,
         320
       ]
     },
@@ -296,7 +692,7 @@
           },
           "conditions": [
             {
-              "id": "ba52027b-93f1-41c4-af49-3e24f56c89dd",
+              "id": "3aa5d801-7075-418c-bdb0-5cb9fe43ddaf",
               "leftValue": "={{ $json.action }}",
               "rightValue": "sendConfirm",
               "operator": {
@@ -309,13 +705,45 @@
         },
         "looseTypeValidation": false
       },
-      "id": "2505ad0a-dffd-41db-9f89-7039ed0e191d",
+      "id": "d976610e-c86f-4b25-ac56-feced4b9fce3",
       "name": "¿Es petición de confirmación?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
-        -120,
+        80,
         400
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "6b535891-2ed2-4a0d-b8e4-cc71d0918648",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "apiCall",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": false
+      },
+      "id": "abbc712b-898c-4653-8c16-551ec2bc12f3",
+      "name": "¿Necesita llamar a la API?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        320,
+        480
       ]
     },
     {
@@ -323,18 +751,18 @@
         "resource": "callback",
         "queryId": "={{ $json.queryId }}"
       },
-      "id": "9af2ee6e-da01-412e-9726-886f88970ecd",
+      "id": "9618bd6f-d569-40d5-9527-01bfd5b13841",
       "name": "Responder callback",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
       "position": [
-        -380,
+        -640,
         160
       ],
       "credentials": {
         "telegramApi": {
           "id": "PON_TU_CREDENCIAL",
-          "name": "SeratelControl-bot"
+          "name": "SupCe bot"
         }
       }
     },
@@ -345,21 +773,22 @@
         "messageId": "={{ $json.messageId }}",
         "text": "={{ $json.text }}",
         "additionalFields": {
-          "parse_mode": "HTML"
+          "parse_mode": "HTML",
+          "appendAttribution": false
         }
       },
-      "id": "e15f852c-3d1a-4351-a863-5f52becd2f9f",
+      "id": "08fe2710-a7a4-4208-8e80-8517d2342f63",
       "name": "Actualizar confirmación",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
       "position": [
-        -120,
-        320
+        -160,
+        240
       ],
       "credentials": {
         "telegramApi": {
           "id": "PON_TU_CREDENCIAL",
-          "name": "SeratelControl-bot"
+          "name": "SupCe bot"
         }
       }
     },
@@ -369,6 +798,7 @@
         "text": "={{ $json.text }}",
         "additionalFields": {
           "parse_mode": "HTML",
+          "appendAttribution": false,
           "reply_to_message_id": "={{ $json.replyToMessageId }}"
         },
         "replyMarkup": "inlineKeyboard",
@@ -395,18 +825,18 @@
           ]
         }
       },
-      "id": "1a3197a8-4644-4b86-a109-49b46cc880d7",
+      "id": "f73487de-d904-4143-bfd4-64e9edb9d183",
       "name": "Pedir confirmación",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
       "position": [
-        140,
-        400
+        80,
+        320
       ],
       "credentials": {
         "telegramApi": {
           "id": "PON_TU_CREDENCIAL",
-          "name": "SeratelControl-bot"
+          "name": "SupCe bot"
         }
       }
     },
@@ -416,23 +846,198 @@
         "text": "={{ $json.text }}",
         "additionalFields": {
           "parse_mode": "HTML",
+          "appendAttribution": false,
           "reply_to_message_id": "={{ $json.replyToMessageId }}"
         }
       },
-      "id": "c6ca1361-2546-439d-a8c7-c07b016d0798",
+      "id": "d4512c09-e467-4c6a-ab63-02ef6ab8a695",
       "name": "Responder",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
       "position": [
-        140,
-        500
+        840,
+        560
       ],
       "credentials": {
         "telegramApi": {
           "id": "PON_TU_CREDENCIAL",
-          "name": "SeratelControl-bot"
+          "name": "SupCe bot"
         }
       }
+    },
+    {
+      "parameters": {
+        "method": "={{ $json.httpMethod }}",
+        "url": "={{ 'http://IP_TAILSCALE_RASPBERRY:8000/api' + $json.httpPath }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "PON_AQUI_TU_API_KEY"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.httpBody }}",
+        "options": {}
+      },
+      "id": "99da296f-bc5f-42fd-b573-d2036fb9badc",
+      "name": "Llamar a la API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "onError": "continueErrorOutput",
+      "position": [
+        560,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const input = $input.first().json;\nconst ctx = $('Restaurar tras guardar pendingConfirm').item.json;\nconst isConfirm = ctx.replyKind === 'confirmExec';\nconst nextBotState = ctx.nextBotState || {};\n\nfunction extractErrorDetail(errVal) {\n  const raw = typeof errVal === 'string' ? errVal : (errVal && errVal.message) || JSON.stringify(errVal);\n  try {\n    const match = raw.match(/\\{.*\\}/);\n    if (match) {\n      const parsed = JSON.parse(match[0]);\n      if (parsed.detail) return parsed.detail;\n    }\n  } catch (e) { /* no era JSON, se usa el texto tal cual */ }\n  return raw;\n}\n\nconst ALARM_LABELS = {\n  rfl_power_alarm: 'RFL Power', fwd_power_alarm: 'FWD Power', exc_power_alarm: 'EXC. Power',\n  temp_combiner_alarm: 'Temp. Combiner', permanent_fail_alarm: 'Permanent Fail',\n  ext_interlock_alarm: 'Ext. Interlock', control_unit_power_alarm: 'Control Unit Power',\n};\n\nlet text;\n\nif (input.error !== undefined) {\n  const detail = extractErrorDetail(input.error);\n  text = isConfirm ? `❌ Error al ${ctx.pendingActionLabel}: ${detail}` : `❌ Error: ${detail}`;\n} else {\n  const data = input;\n  switch (ctx.replyKind) {\n    case 'estado':\n      text = data.text;\n      break;\n    case 'alarmas': {\n      const activas = Object.entries(ALARM_LABELS).filter(([k]) => data[k]).map(([, v]) => v);\n      text = activas.length ? `🚨 Alarmas activas: ${activas.join(', ')}` : '✅ Sin alarmas activas';\n      break;\n    }\n    case 'log': {\n      if (!data.points || !data.points.length) {\n        text = 'Sin lecturas en el histórico todavía.';\n      } else {\n        const lines = data.points.map(p => {\n          const m = p.measurements;\n          return `${p.timestamp} — FWD ${m ? m.fwd_power_w : '—'}W, DC ${m ? m.vdc_volts : '—'}V`;\n        });\n        text = `<b>Últimas ${data.points.length} lecturas:</b>\\n` + lines.join('\\n');\n      }\n      break;\n    }\n    case 'subir':\n      text = `⬆️ Potencia subida (${data.raw_hex}).`;\n      break;\n    case 'bajar':\n      text = `⬇️ Potencia bajada (${data.raw_hex}).`;\n      break;\n    case 'potencia':\n      text = `🎚️ Potencia fijada al ${ctx.pct}% (${data.raw_hex}).`;\n      break;\n    case 'maxima':\n      text = `🔺 Potencia máxima fijada (${data.raw_hex}).`;\n      break;\n    case 'conectar': {\n      const target = data.transport === 'serial' ? data.device : `${data.host}:${data.port}`;\n      text = `🔌 Conectado — ${target} (${data.transport}).`;\n      break;\n    }\n    case 'desconectar':\n      text = '🔌 Desconectado.';\n      break;\n    case 'confirmExec':\n      text = `✅ ${ctx.pendingActionLabel} — hecho (${data.raw_hex || data.ack_hex || 'ok'}).`;\n      break;\n    default:\n      text = JSON.stringify(data);\n  }\n}\n\nif (isConfirm) {\n  return [{ json: { action: 'editConfirm', chatId: ctx.chatId, messageId: ctx.messageId, text, nextBotState } }];\n}\n\nconst lastReplyMessageIds = nextBotState.lastReplyMessageIds || {};\nreturn [{\n  json: {\n    action: 'reply',\n    chatId: ctx.chatId,\n    replyToMessageId: ctx.replyToMessageId,\n    text,\n    hasReplyPinned: !!lastReplyMessageIds[ctx.chatId],\n    replyMessageId: lastReplyMessageIds[ctx.chatId] || null,\n    nextBotState,\n  },\n}];\n"
+      },
+      "id": "e2fdd628-57d6-4860-9c44-84eaea2391c4",
+      "name": "Formatear respuesta de API",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        640
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "f79ba51f-451a-4437-b377-f05f0123bc96",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "editConfirm",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": false
+      },
+      "id": "719e4678-1026-408f-94fe-039d27ea2b0f",
+      "name": "¿Es resultado de confirmación?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        800,
+        640
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "ae32c42d-6323-4712-811a-5d75ffe8c40c",
+              "leftValue": "={{ $json.hasReplyPinned }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": false
+      },
+      "id": "f53fbfb4-048b-4912-a21f-faf8056ede93",
+      "name": "¿Hay mensaje de respuesta fijado?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        560,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "editMessageText",
+        "chatId": "={{ $json.chatId }}",
+        "messageId": "={{ $json.replyMessageId }}",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "parse_mode": "HTML",
+          "appendAttribution": false
+        }
+      },
+      "id": "67839d09-eb31-4917-be88-32157e31ebe0",
+      "name": "Editar respuesta",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        800,
+        760
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "PON_TU_CREDENCIAL",
+          "name": "SupCe bot"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Se ejecuta tras mandar/editar el mensaje de respuesta en Telegram.\n// Toma el nextBotState que ya trae el item (de \"Procesar comando\" o de\n// \"Formatear respuesta de API\", según el camino) y solo le añade el\n// message_id nuevo para ese chat.\nconst src = $('¿Hay mensaje de respuesta fijado?').item.json;\nconst sent = $input.first().json;\nconst chatId = (sent.chat && sent.chat.id) || src.chatId;\nconst messageId = sent.message_id;\n\nconst nextBotState = { ...(src.nextBotState || {}) };\nnextBotState.lastReplyMessageIds = { ...(nextBotState.lastReplyMessageIds || {}) };\nif (chatId !== undefined && messageId !== undefined) {\n  nextBotState.lastReplyMessageIds[chatId] = messageId;\n}\n\nreturn [{ json: nextBotState }];\n"
+      },
+      "id": "1c9f1766-0926-4779-8848-91f7f0d53a48",
+      "name": "Preparar guardado (respuesta)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1080,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "http://IP_TAILSCALE_RASPBERRY:8000/api/bot-state",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "PON_AQUI_TU_API_KEY"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "7b6a9065-294b-40dc-9728-7eae59d15a2c",
+      "name": "PUT bot-state (respuesta)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        700
+      ]
     }
   ],
   "connections": {
@@ -440,14 +1045,50 @@
       "main": [
         [
           {
-            "node": "Leer estado y preparar dashboard",
+            "node": "GET bot-state (dashboard)",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Leer estado y preparar dashboard": {
+    "GET bot-state (dashboard)": {
+      "main": [
+        [
+          {
+            "node": "GET /status",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "GET /status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GET /status": {
+      "main": [
+        [
+          {
+            "node": "Preparar dashboard",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar dashboard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar dashboard": {
       "main": [
         [
           {
@@ -496,7 +1137,13 @@
     },
     "Editar dashboard": {
       "main": [
-        [],
+        [
+          {
+            "node": "Preparar guardado (dashboard)",
+            "type": "main",
+            "index": 0
+          }
+        ],
         [
           {
             "node": "Enviar dashboard",
@@ -510,7 +1157,18 @@
       "main": [
         [
           {
-            "node": "Guardar ID de mensaje",
+            "node": "Preparar guardado (dashboard)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar guardado (dashboard)": {
+      "main": [
+        [
+          {
+            "node": "PUT bot-state (dashboard)",
             "type": "main",
             "index": 0
           }
@@ -519,6 +1177,24 @@
     },
     "Comandos y botones": {
       "main": [
+        [
+          {
+            "node": "GET bot-state (cmd)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GET bot-state (cmd)": {
+      "main": [
+        [
+          {
+            "node": "Procesar comando",
+            "type": "main",
+            "index": 0
+          }
+        ],
         [
           {
             "node": "Procesar comando",
@@ -548,6 +1224,28 @@
             "index": 0
           }
         ],
+        [
+          {
+            "node": "PUT bot-state (pendingConfirm)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PUT bot-state (pendingConfirm)": {
+      "main": [
+        [
+          {
+            "node": "Restaurar tras guardar pendingConfirm",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restaurar tras guardar pendingConfirm": {
+      "main": [
         [
           {
             "node": "¿Es edición de confirmación?",
@@ -586,7 +1284,130 @@
         ],
         [
           {
+            "node": "¿Necesita llamar a la API?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Necesita llamar a la API?": {
+      "main": [
+        [
+          {
+            "node": "Llamar a la API",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "¿Hay mensaje de respuesta fijado?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Llamar a la API": {
+      "main": [
+        [
+          {
+            "node": "Formatear respuesta de API",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Formatear respuesta de API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formatear respuesta de API": {
+      "main": [
+        [
+          {
+            "node": "¿Es resultado de confirmación?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Es resultado de confirmación?": {
+      "main": [
+        [
+          {
+            "node": "Actualizar confirmación",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "¿Hay mensaje de respuesta fijado?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Hay mensaje de respuesta fijado?": {
+      "main": [
+        [
+          {
+            "node": "Editar respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
             "node": "Responder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Editar respuesta": {
+      "main": [
+        [
+          {
+            "node": "Preparar guardado (respuesta)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Responder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Responder": {
+      "main": [
+        [
+          {
+            "node": "Preparar guardado (respuesta)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar guardado (respuesta)": {
+      "main": [
+        [
+          {
+            "node": "PUT bot-state (respuesta)",
             "type": "main",
             "index": 0
           }
@@ -601,5 +1422,5 @@
   "meta": {
     "templateCredsSetupCompleted": false
   },
-  "id": "05ae009d-7228-4c11-ab56-a0c39262819d"
+  "id": "99e73264-97c6-4d8b-a2e3-d235cc1a4322"
 }
